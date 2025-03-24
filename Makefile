@@ -11,7 +11,7 @@ run:
 	qemu-system-x86_64 \
 		-machine q35 \
 		-boot menu=off \
-		-drive if=pflash,format=raw,readonly=on,file=./vmtest/ovmf/OVMF.4m.fd \
+		-drive if=pflash,format=raw,readonly=on,file=./vmtest/ovmf/OVMF.fd \
 		-drive format=raw,file=fat:rw:./vmtest \
 		-serial stdio
 
