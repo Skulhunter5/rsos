@@ -1,16 +1,6 @@
-#![allow(unused)]
+use core::sync::atomic::{AtomicBool, Ordering};
 
-use core::{
-    ffi::c_void,
-    sync::atomic::{AtomicPtr, Ordering},
-};
-
-pub type EfiHandle = *const c_void;
-pub type ImageHandle = *const c_void;
-
-type EfiVoidPointer = *const c_void;
-
-pub type EfiSimpleTextInputProtocol = *const c_void;
+pub mod raw;
 
 mod text;
 
@@ -21,18 +11,22 @@ mod status;
 pub use status::Status;
 
 mod config_table;
-pub use config_table::{ConfigurationTable, ConfigurationTableEntry, ConfigurationTableIterator};
+pub use config_table::ConfigurationTable;
 
 mod boot_services;
 pub use boot_services::BootServices;
 
 pub struct SystemTable {
-    table: &'static RawSystemTable,
+    table: &'static raw::tables::SystemTable,
+    boot_services_lock: AtomicBool,
 }
 
 impl SystemTable {
-    pub unsafe fn from(table: &'static RawSystemTable) -> Self {
-        Self { table }
+    pub unsafe fn from(table: &'static raw::tables::SystemTable) -> Self {
+        Self {
+            table,
+            boot_services_lock: AtomicBool::new(false),
+        }
     }
 
     pub fn stdout(&self) -> Option<text::Output> {
@@ -67,54 +61,16 @@ impl SystemTable {
             ))
         }
     }
+
+    pub fn boot_services(&self) -> Option<BootServices> {
+        if self
+            .boot_services_lock
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            Some(BootServices::new(self))
+        } else {
+            None
+        }
+    }
 }
-
-#[repr(C)]
-pub struct TableHeader {
-    signature: u64,
-    revision: u32,
-    size: u32,
-    crc32: u32,
-    reserved: u32,
-}
-
-#[repr(C)]
-pub struct RawSystemTable {
-    header: TableHeader,
-    firmware_vendor: EfiVoidPointer,
-    firmware_revision: u32,
-    console_in_handle: EfiHandle,
-    con_in: EfiSimpleTextInputProtocol,
-    console_out_handle: EfiHandle,
-    con_out: AtomicPtr<SimpleTextOutputProtocol>,
-    standard_error_handle: EfiHandle,
-    std_err: AtomicPtr<SimpleTextOutputProtocol>,
-    runtime_services: EfiVoidPointer,
-    boot_services: AtomicPtr<BootServices>,
-    number_of_table_entries: usize,
-    configuration_table: *const ConfigurationTableEntry,
-}
-
-#[repr(C)]
-pub struct SimpleTextOutputProtocol {
-    pub reset: Reset,
-    pub output_string: OutputString,
-    test_string: EfiVoidPointer,
-    query_mode: EfiVoidPointer,
-    set_mode: EfiVoidPointer,
-    set_attribute: EfiVoidPointer,
-    clear_screen: EfiVoidPointer,
-    set_cursor_position: EfiVoidPointer,
-    enable_cursor: EfiVoidPointer,
-    mode: EfiVoidPointer,
-}
-
-pub type OutputString = extern "efiapi" fn(
-    output_protocol: *const SimpleTextOutputProtocol,
-    string: *const u16,
-) -> Status;
-
-pub type Reset = extern "efiapi" fn(
-    output_protocol: *const SimpleTextOutputProtocol,
-    extended_verification: bool,
-) -> Status;

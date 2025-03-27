@@ -1,14 +1,17 @@
 use core::{fmt::Write, sync::atomic::Ordering};
 
-use super::{RawSystemTable, SimpleTextOutputProtocol};
+use super::raw::{self, protocols::SimpleTextOutputProtocol};
 
 pub struct Output<'a> {
-    table: &'a RawSystemTable,
+    table: &'a raw::tables::SystemTable,
     proto: &'a mut SimpleTextOutputProtocol,
 }
 
 impl<'a> Output<'a> {
-    pub fn new(table: &'a RawSystemTable, proto: &'a mut SimpleTextOutputProtocol) -> Self {
+    pub fn new(
+        table: &'a raw::tables::SystemTable,
+        proto: &'a mut SimpleTextOutputProtocol,
+    ) -> Self {
         Self { table, proto }
     }
 

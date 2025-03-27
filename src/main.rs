@@ -1,21 +1,32 @@
 #![no_std]
 #![no_main]
 
+#![feature(allocator_api)]
+
 use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
-use uefi::{ImageHandle, RawSystemTable, SystemTable};
+use uefi::{
+    SystemTable,
+    raw::{self, ImageHandle},
+};
 
+pub mod uefi;
 mod io;
 mod pci;
 mod spin;
 mod uart;
-mod uefi;
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
     unsafe {
         uart::puts("!!! PANIC !!!");
+        match info.message().as_str() {
+            Some(message) => uart::puts(message),
+            None => uart::puts("PanicMessage.as_str() failed"),
+        }
     }
+
+    // End the panic handler in an infinite loop to halt the system
     loop {}
 }
 
@@ -96,8 +107,14 @@ unsafe impl GlobalAlloc for BootloaderAllocator {
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {}
 }
 
+pub unsafe fn halt() {
+    unsafe {
+        core::arch::asm!("hlt", options(att_syntax, nomem, nostack),);
+    }
+}
+
 #[unsafe(no_mangle)]
-pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut RawSystemTable) {
+pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::tables::SystemTable) {
     let system_table = unsafe { system_table.as_mut().expect("UEFI SystemTable is nullptr") };
     let system_table = unsafe { SystemTable::from(system_table) };
 
@@ -108,6 +125,15 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut RawSyst
     stdout.puts("Hello from UEFI\n").unwrap();
 
     println!("Hello from UART");
+    println!("Stalling 1 second...");
+
+    let boot_services = system_table.boot_services().expect("missing boot services");
+    boot_services.stall_us(1_000_000);
+
+    println!("Continuing!");
+
+    let memory_map_size = boot_services.get_memory_map_size().expect("failed to get memory map");
+    println!("mem-map size: {}", memory_map_size);
 
     for entry in system_table.config_table().unwrap().iter() {
         if entry.guid == uefi::Guid::EFI_ACPI_TABLE_GUID {

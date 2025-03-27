@@ -1,12 +1,6 @@
-use core::{ffi::c_void, marker::PhantomData};
+use core::marker::PhantomData;
 
-use super::Guid;
-
-#[repr(C)]
-pub struct ConfigurationTableEntry {
-    pub guid: Guid,
-    pub ptr: *mut c_void,
-}
+use super::raw::tables::ConfigurationTableEntry;
 
 pub struct ConfigurationTable<'a> {
     count: usize,
