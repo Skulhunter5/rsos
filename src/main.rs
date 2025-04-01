@@ -1,20 +1,22 @@
 #![no_std]
 #![no_main]
-
 #![feature(allocator_api)]
+
+extern crate alloc;
 
 use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
+use alloc::alloc::Global;
 use uefi::{
     SystemTable,
     raw::{self, ImageHandle},
 };
 
-pub mod uefi;
 mod io;
 mod pci;
 mod spin;
 mod uart;
+pub mod uefi;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -84,6 +86,7 @@ const HEAP_END: *const u8 = unsafe { HEAP.as_ptr().byte_add(HEAP_SIZE) };
 
 struct BootloaderAllocator;
 
+// TODO: make the global allocator threadsafe
 unsafe impl GlobalAlloc for BootloaderAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         if unsafe { HEAP_PTR } >= HEAP_END {
@@ -132,8 +135,15 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
 
     println!("Continuing!");
 
-    let memory_map_size = boot_services.get_memory_map_size().expect("failed to get memory map");
+    let memory_map_size = boot_services
+        .get_memory_map_size()
+        .expect("failed to get memory map");
     println!("mem-map size: {}", memory_map_size);
+    let memory_map = boot_services.get_memory_map(Global).unwrap();
+    println!("memory_map: {:?}", memory_map);
+    //for i in 0..memory_map.len() {
+    //    println!("- {}: {:?}", i, memory_map.get(i));
+    //}
 
     for entry in system_table.config_table().unwrap().iter() {
         if entry.guid == uefi::Guid::EFI_ACPI_TABLE_GUID {

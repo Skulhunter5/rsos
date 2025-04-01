@@ -2,7 +2,11 @@ use core::{ffi::c_void, sync::atomic::AtomicPtr};
 
 use crate::uefi::Guid;
 
-use super::{protocols::SimpleTextOutputProtocol, services::{GetMemoryMap, Stall}, ImageHandle};
+use super::{
+    ImageHandle,
+    protocols::SimpleTextOutputProtocol,
+    services::{GetMemoryMap, Stall},
+};
 
 #[repr(C)]
 pub struct TableHeader {

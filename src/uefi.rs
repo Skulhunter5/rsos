@@ -16,6 +16,9 @@ pub use config_table::ConfigurationTable;
 mod boot_services;
 pub use boot_services::BootServices;
 
+mod memory_map;
+pub use memory_map::MemoryMap;
+
 pub struct SystemTable {
     table: &'static raw::tables::SystemTable,
     boot_services_lock: AtomicBool,
@@ -68,7 +71,7 @@ impl SystemTable {
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
-            Some(BootServices::new(self))
+            Some(unsafe { BootServices::new(self) })
         } else {
             None
         }
