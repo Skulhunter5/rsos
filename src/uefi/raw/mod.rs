@@ -6,10 +6,98 @@ pub mod tables;
 
 pub type ImageHandle = *const c_void;
 
+#[macro_export]
+macro_rules! newtype_enum {
+    (
+        $(#[$type_attrs:meta])*
+        $visibility:vis enum $type:ident : $base_integer:ty => $(#[$impl_attrs:meta])* {
+            $(
+                $(#[$variant_attrs:meta])*
+                $variant:ident = $value:expr,
+            )*
+        }
+    ) => {
+        $(#[$type_attrs])*
+        #[repr(transparent)]
+        #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+        $visibility struct $type(pub $base_integer);
+
+        $(#[$impl_attrs])*
+        #[allow(unused)]
+        impl $type {
+            $(
+                $(#[$variant_attrs])*
+                pub const $variant: $type = $type($value);
+            )*
+        }
+
+        impl core::fmt::Debug for $type {
+            fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+                match *self {
+                    // Display variants by their name, like Rust enums do
+                    $(
+                        $type::$variant => write!(f, stringify!($variant)),
+                    )*
+
+                    // Display unknown variants in tuple struct format
+                    $type(unknown) => {
+                        write!(f, "{}({})", stringify!($type), unknown)
+                    }
+                }
+            }
+        }
+    }
+}
+
+newtype_enum! {
+    #[derive(Default)]
+    pub enum MemoryType: i32 => #[allow(missing_docs)] {
+        RESERVED_MEMORY_TYPE = 0,
+        LOADER_CODE = 1,
+        LOADER_DATA = 2,
+        BOOT_SERVICES_CODE = 3,
+        BOOT_SERVICES_DATA = 4,
+        RUNTIME_SERVICES_CODE = 5,
+        RUNTIME_SERVICES_DATA = 6,
+        CONVENTIONAL_MEMORY = 7,
+        UNUSABLE_MEMORY = 8,
+        ACPI_RECLAIM_MEMORY = 9,
+        ACPI_MEMORY_NVS = 10,
+        MEMORY_MAPPED_IO = 11,
+        MEMORY_MAPPED_IO_PORT_SPACE = 12,
+        PAL_CODE = 13,
+        PERSISTENT_MEMORY = 14,
+        UNACCEPTED_MEMORY_TYPE = 15,
+        MAX_MEMORY_TYPE = 16,
+    }
+}
+
+//#[repr(u32)]
+//#[derive(Debug)]
+//pub enum MemoryType {
+//    ReservedMemoryType,
+//    LoaderCode,
+//    LoaderData,
+//    BootServicesCode,
+//    BootServicesData,
+//    RuntimeServicesCode,
+//    RuntimeServicesData,
+//    ConventionalMemory,
+//    UnusableMemory,
+//    ACPIReclaimMemory,
+//    ACPIMemoryNVS,
+//    MemoryMappedIO,
+//    MemoryMappedIOPortSpace,
+//    PalCode,
+//    PersistentMemory,
+//    UnacceptedMemoryType,
+//    MaxMemoryType,
+//}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct MemoryDescriptor {
-    ty: u32,
+    ty: MemoryType,
     physical_start: *const c_void,
     virtual_start: *const c_void,
     page_count: u64,
