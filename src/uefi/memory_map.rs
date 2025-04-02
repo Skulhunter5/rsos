@@ -24,4 +24,26 @@ impl MemoryMap {
         }
         return unsafe { self.data.add(index).as_ref() };
     }
+
+    pub fn iter(&self) -> MemoryMapIterator {
+        MemoryMapIterator { inner: self, index: 0 }
+    }
+}
+
+pub struct MemoryMapIterator<'a> {
+    inner: &'a MemoryMap,
+    index: usize,
+}
+
+impl<'a> Iterator for MemoryMapIterator<'a> {
+    type Item = &'a MemoryDescriptor;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.inner.len() {
+            return None;
+        }
+        let elem = unsafe { self.inner.data.add(self.index).as_ref()? };
+        self.index += 1;
+        return Some(elem)
+    }
 }

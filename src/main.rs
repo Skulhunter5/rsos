@@ -141,6 +141,9 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     println!("mem-map size: {}", memory_map_size);
     let memory_map = boot_services.get_memory_map(Global).unwrap();
     println!("memory_map: {:?}", memory_map);
+    for entry in memory_map.iter() {
+        println!("- {:?}", entry);
+    }
     //for i in 0..memory_map.len() {
     //    println!("- {}: {:?}", i, memory_map.get(i));
     //}
