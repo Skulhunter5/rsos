@@ -7,6 +7,7 @@ extern crate alloc;
 use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
 use alloc::alloc::Global;
+use pci::Pci;
 use uefi::{
     SystemTable,
     raw::{self, ImageHandle},
@@ -128,10 +129,10 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     stdout.puts("Hello from UEFI\n").unwrap();
 
     println!("Hello from UART");
-    println!("Stalling 1 second...");
+    println!("Stalling 0.25 seconds...");
 
     let boot_services = system_table.boot_services().expect("missing boot services");
-    boot_services.stall_us(1_000_000);
+    boot_services.stall_us(1_000_000 / 4);
 
     println!("Continuing!");
 
@@ -141,9 +142,9 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     println!("mem-map size: {}", memory_map_size);
     let memory_map = boot_services.get_memory_map(Global).unwrap();
     println!("memory_map: {:?}", memory_map);
-    for entry in memory_map.iter() {
-        println!("- {:?}", entry);
-    }
+    //for entry in memory_map.iter() {
+    //    println!("- {:?}", entry);
+    //}
     //for i in 0..memory_map.len() {
     //    println!("- {}: {:?}", i, memory_map.get(i));
     //}
@@ -153,6 +154,11 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
             println!("Found ACPI Table");
         }
     }
+
+    println!();
+    println!("PCI:");
+    unsafe { pci::test(); }
+    //println!("- VendorId: {:#x}", Pci::get_vendor_id(0, 0, 0));
 
     loop {}
 }
