@@ -5,7 +5,8 @@ use core::{
 };
 
 use super::{
-    raw::{self, MemoryDescriptor}, MemoryMap, Status, SystemTable
+    MemoryMap, Status, SystemTable,
+    raw::{self, MemoryDescriptor},
 };
 
 pub struct BootServices<'a> {

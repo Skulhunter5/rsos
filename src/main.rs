@@ -1,13 +1,13 @@
 #![no_std]
 #![no_main]
 #![feature(allocator_api)]
+#![feature(inline_const_pat)]
 
 extern crate alloc;
 
 use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
 use alloc::alloc::Global;
-use pci::Pci;
 use uefi::{
     SystemTable,
     raw::{self, ImageHandle},
@@ -157,7 +157,9 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
 
     println!();
     println!("PCI:");
-    unsafe { pci::test(); }
+    unsafe {
+        pci::test();
+    }
     //println!("- VendorId: {:#x}", Pci::get_vendor_id(0, 0, 0));
 
     loop {}

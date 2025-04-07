@@ -26,7 +26,10 @@ impl MemoryMap {
     }
 
     pub fn iter(&self) -> MemoryMapIterator {
-        MemoryMapIterator { inner: self, index: 0 }
+        MemoryMapIterator {
+            inner: self,
+            index: 0,
+        }
     }
 }
 
@@ -44,6 +47,6 @@ impl<'a> Iterator for MemoryMapIterator<'a> {
         }
         let elem = unsafe { self.inner.data.add(self.index).as_ref()? };
         self.index += 1;
-        return Some(elem)
+        return Some(elem);
     }
 }
