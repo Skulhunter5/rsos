@@ -1,6 +1,9 @@
 use core::marker::PhantomData;
 
-use super::raw::tables::ConfigurationTableEntry;
+//use rsos::acpi::Rsdp;
+use crate::acpi::Rsdp;
+
+use super::{raw::tables::ConfigurationTableEntry, Guid};
 
 pub struct ConfigurationTable<'a> {
     count: usize,
@@ -26,6 +29,16 @@ impl ConfigurationTable<'_> {
             table: self,
             index: 0,
         }
+    }
+
+    // TODO: pass on errors instead of discarding
+    pub fn get_rsdp(&self) -> Option<Rsdp> {
+        for entry in self.iter() {
+            if entry.guid == Guid::EFI_ACPI_TABLE_GUID {
+                return unsafe { Rsdp::from_raw_ptr(entry.ptr).ok() };
+            }
+        }
+        return None;
     }
 }
 

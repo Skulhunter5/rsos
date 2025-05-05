@@ -2,12 +2,15 @@
 #![no_main]
 #![feature(allocator_api)]
 #![feature(inline_const_pat)]
+#![feature(ptr_metadata)]
 
 extern crate alloc;
 
 use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
 use alloc::alloc::Global;
+//use rsos::acpi::AcpiTables;
+use crate::acpi::AcpiTables;
 use uefi::{
     SystemTable,
     raw::{self, ImageHandle},
@@ -18,6 +21,8 @@ mod pci;
 mod spin;
 mod uart;
 pub mod uefi;
+
+mod acpi;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -78,7 +83,7 @@ macro_rules! println {
 #[global_allocator]
 static GLOBAL_ALLOCATOR: BootloaderAllocator = BootloaderAllocator;
 
-const HEAP_SIZE: usize = 64 * 1024;
+const HEAP_SIZE: usize = 512 * 1024;
 static mut HEAP: [u8; HEAP_SIZE] = [0u8; HEAP_SIZE];
 #[allow(static_mut_refs)]
 static mut HEAP_PTR: *const u8 = unsafe { HEAP.as_ptr() };
@@ -149,10 +154,17 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     //    println!("- {}: {:?}", i, memory_map.get(i));
     //}
 
-    for entry in system_table.config_table().unwrap().iter() {
-        if entry.guid == uefi::Guid::EFI_ACPI_TABLE_GUID {
-            println!("Found ACPI Table");
-        }
+    let config_table = system_table.config_table().unwrap();
+    //for entry in config_table.iter() {
+    //    if entry.guid == uefi::Guid::EFI_ACPI_TABLE_GUID {
+    //        println!("Found ACPI Table");
+    //    }
+    //}
+
+    let rsdp = config_table.get_rsdp().unwrap();
+    println!("RSDP revision: {}", rsdp.revision());
+    for table in AcpiTables::from_rsdp(rsdp).unwrap() {
+        println!("{:?}", table);
     }
 
     println!();
