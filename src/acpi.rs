@@ -57,7 +57,11 @@ impl Rsdp {
             }
             2 => {
                 let xsdp_ptr = rsdp_ptr as *const raw::Xsdp;
-                let xsdp = unsafe { xsdp_ptr.as_ref().expect("unreachable, pointer already checked at the start") };
+                let xsdp = unsafe {
+                    xsdp_ptr
+                        .as_ref()
+                        .expect("unreachable, pointer already checked at the start")
+                };
                 if unsafe { !xsdp.validate() } {
                     return Err(RsdpError::InvalidChecksum);
                 }
@@ -90,6 +94,7 @@ impl Rsdp {
                     return Err(AcpiError::InvalidChecksum);
                 }
                 let rsdt = unsafe { rsdp.rsdt() };
+                // TODO: validate rsdt
 
                 Ok(Rsdt::Rsdt(rsdt))
             }
@@ -99,6 +104,9 @@ impl Rsdp {
                     return Err(AcpiError::InvalidChecksum);
                 }
                 let xsdt = unsafe { xsdp.xsdt() };
+                if unsafe { !(&*xsdt).validate() } {
+                    return Err(AcpiError::InvalidChecksum);
+                }
 
                 Ok(Rsdt::Xsdt(xsdt))
             }
@@ -127,12 +135,10 @@ impl Rsdt {
             }
             Self::Xsdt(xsdt) => {
                 let xsdt = unsafe { &**xsdt };
-                if index >= xsdt.tables.len() {
+                if index >= xsdt.len() {
                     return None;
                 }
-                crate::println!("tables: {:?}", &xsdt.tables);
                 let address: u64 = xsdt.tables[index];
-                crate::println!("ptr: {:x}", address);
                 let header_ptr = address as *const SdtHeader;
                 let table = unsafe { Table::from(header_ptr) };
                 Some(table)
@@ -153,10 +159,8 @@ pub enum Table {
 
 impl Table {
     unsafe fn from(ptr: *const SdtHeader) -> Self {
-        crate::println!("ptr: {:?}", ptr);
         let header = unsafe { &*ptr };
         let size = header.length as usize - mem::size_of::<SdtHeader>();
-        crate::println!("sig: {:?}", header.signature);
         match header.signature {
             raw::MCFG_SIGNATURE => {
                 // Remove the size for the additional reserved field before the MCFG array
@@ -164,7 +168,7 @@ impl Table {
                 let count = size / mem::size_of::<ConfigurationSpaceBaseAddressAllocation>();
                 let ptr: *const raw::Mcfg = core::ptr::from_raw_parts(ptr as *const (), count);
                 Self::Mcfg(Mcfg(ptr))
-            },
+            }
             _ => Self::Other(ptr),
         }
     }

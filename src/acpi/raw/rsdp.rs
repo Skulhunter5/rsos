@@ -1,4 +1,4 @@
-use core::mem;
+use core::{mem, ptr};
 
 use super::{Rsdt, SdtHeader, Xsdt};
 
@@ -19,18 +19,20 @@ impl Rsdp {
         let rsdp_ptr = self as *const Self;
         let rsdp_ptr = rsdp_ptr as *const u8;
 
-        let sum = (0..RSDP_SIZE).map(|i| unsafe { *rsdp_ptr.add(i) } as usize).sum::<usize>();
+        let sum = (0..RSDP_SIZE)
+            .map(|i| unsafe { *rsdp_ptr.add(i) } as usize)
+            .sum::<usize>();
         return sum & 0xFF == 0;
     }
 
     pub unsafe fn rsdt(&self) -> *const Rsdt {
         let rsdp = self;
-        let address = rsdp.rsdt_address;
+        let address = rsdp.rsdt_address as usize;
         let header = unsafe { &*(address as *const SdtHeader) };
 
         let content_size = (header.length as usize) - mem::size_of::<SdtHeader>();
         let count = content_size / mem::size_of::<u32>();
-        let ptr: *const Rsdt = core::ptr::from_raw_parts(address as *const (), count);
+        let ptr: *const Rsdt = ptr::from_raw_parts(address as *const (), count);
 
         ptr
     }
@@ -58,7 +60,9 @@ impl Xsdp {
         let rsdp_ptr = rsdp_ptr as *const u8;
         let xsdp_ptr = unsafe { rsdp_ptr.add(RSDP_SIZE) };
 
-        let sum = (0..XSDP_SIZE).map(|i| unsafe { *xsdp_ptr.add(i) } as usize).sum::<usize>();
+        let sum = (0..XSDP_SIZE)
+            .map(|i| unsafe { *xsdp_ptr.add(i) } as usize)
+            .sum::<usize>();
         return sum & 0xFF == 0;
     }
 
@@ -68,12 +72,12 @@ impl Xsdp {
 
     pub unsafe fn xsdt(&self) -> *const Xsdt {
         let xsdp = self;
-        let address = xsdp.xsdt_address;
+        let address = xsdp.xsdt_address as usize;
         let header = unsafe { &*(address as *const SdtHeader) };
 
         let content_size = (header.length as usize) - mem::size_of::<SdtHeader>();
         let count = content_size / mem::size_of::<u64>();
-        let ptr: *const Xsdt = core::ptr::from_raw_parts(address as *const (), count);
+        let ptr: *const Xsdt = ptr::from_raw_parts(address as *const (), count);
 
         ptr
     }

@@ -137,22 +137,46 @@ impl DeviceType {
                         Err((class_code, subclass_code, prog_if))
                     }
                 }
-                SubClass::MassStorageController::OTHER => Ok(Self::MassStorageController(MassStorageControllerType::Other)),
+                SubClass::MassStorageController::OTHER => Ok(Self::MassStorageController(
+                    MassStorageControllerType::Other,
+                )),
                 _ => Err((class_code, subclass_code, prog_if)),
             },
             ClassCode::NETWORK_CONTROLLER => match subclass_code {
-                SubClass::NetworkController::ETHERNET_CONTROLLER => Ok(Self::NetworkController(NetworkControllerType::EthernetController)),
-                SubClass::NetworkController::TOKEN_RING_CONTROLLER => Ok(Self::NetworkController(NetworkControllerType::TokenRingController)),
-                SubClass::NetworkController::FDDI_CONTROLLER => Ok(Self::NetworkController(NetworkControllerType::FddiController)),
-                SubClass::NetworkController::ATM_CONTROLLER => Ok(Self::NetworkController(NetworkControllerType::AtmController)),
-                SubClass::NetworkController::ISDN_CONTROLLER => Ok(Self::NetworkController(NetworkControllerType::IsdnController)),
-                SubClass::NetworkController::WORLD_FIP_CONTROLLER => Ok(Self::NetworkController(NetworkControllerType::WorldFipController)),
-                SubClass::NetworkController::PICMG_214_MULTI_COMPUTING_CONTROLLER => Ok(Self::NetworkController(NetworkControllerType::Picmg214MultiComputingController)),
-                SubClass::NetworkController::INFINIBAND_CONTROLLER => Ok(Self::NetworkController(NetworkControllerType::InfinibandController)),
-                SubClass::NetworkController::FABRIC_CONTROLLER => Ok(Self::NetworkController(NetworkControllerType::FabricController)),
-                SubClass::NetworkController::OTHER => Ok(Self::NetworkController(NetworkControllerType::Other)),
+                SubClass::NetworkController::ETHERNET_CONTROLLER => Ok(Self::NetworkController(
+                    NetworkControllerType::EthernetController,
+                )),
+                SubClass::NetworkController::TOKEN_RING_CONTROLLER => Ok(Self::NetworkController(
+                    NetworkControllerType::TokenRingController,
+                )),
+                SubClass::NetworkController::FDDI_CONTROLLER => Ok(Self::NetworkController(
+                    NetworkControllerType::FddiController,
+                )),
+                SubClass::NetworkController::ATM_CONTROLLER => Ok(Self::NetworkController(
+                    NetworkControllerType::AtmController,
+                )),
+                SubClass::NetworkController::ISDN_CONTROLLER => Ok(Self::NetworkController(
+                    NetworkControllerType::IsdnController,
+                )),
+                SubClass::NetworkController::WORLD_FIP_CONTROLLER => Ok(Self::NetworkController(
+                    NetworkControllerType::WorldFipController,
+                )),
+                SubClass::NetworkController::PICMG_214_MULTI_COMPUTING_CONTROLLER => {
+                    Ok(Self::NetworkController(
+                        NetworkControllerType::Picmg214MultiComputingController,
+                    ))
+                }
+                SubClass::NetworkController::INFINIBAND_CONTROLLER => Ok(Self::NetworkController(
+                    NetworkControllerType::InfinibandController,
+                )),
+                SubClass::NetworkController::FABRIC_CONTROLLER => Ok(Self::NetworkController(
+                    NetworkControllerType::FabricController,
+                )),
+                SubClass::NetworkController::OTHER => {
+                    Ok(Self::NetworkController(NetworkControllerType::Other))
+                }
                 _ => Err((class_code, subclass_code, prog_if)),
-            }
+            },
             ClassCode::DISPLAY_CONTROLLER => match subclass_code {
                 SubClass::DisplayController::VGA_COMPATIBLE_CONTROLLER => {
                     if let Some(ty) = match prog_if {
@@ -161,31 +185,53 @@ impl DeviceType {
                         _ => None,
                     } {
                         Ok(Self::DisplayController(
-                            DisplayControllerType::VgaCompatibleController(ty)
+                            DisplayControllerType::VgaCompatibleController(ty),
                         ))
                     } else {
                         Err((class_code, subclass_code, prog_if))
                     }
                 }
-                SubClass::DisplayController::XGA_CONTROLLER => Ok(Self::DisplayController(DisplayControllerType::XgaController)),
-                SubClass::DisplayController::CONTROLLER_3D => Ok(Self::DisplayController(DisplayControllerType::Controller3D)),
-                SubClass::DisplayController::OTHER => Ok(Self::DisplayController(DisplayControllerType::Other)),
+                SubClass::DisplayController::XGA_CONTROLLER => Ok(Self::DisplayController(
+                    DisplayControllerType::XgaController,
+                )),
+                SubClass::DisplayController::CONTROLLER_3D => {
+                    Ok(Self::DisplayController(DisplayControllerType::Controller3D))
+                }
+                SubClass::DisplayController::OTHER => {
+                    Ok(Self::DisplayController(DisplayControllerType::Other))
+                }
                 _ => Err((class_code, subclass_code, prog_if)),
-            }
+            },
             ClassCode::MULTIMEDIA_CONTROLLER => match subclass_code {
-                SubClass::MultimediaController::MULTIMEDIA_VIDEO_CONTROLLER => Ok(Self::MultimediaController(MultimediaControllerType::MultimediaVideoController)),
-                SubClass::MultimediaController::MULTIMEDIA_AUDIO_CONTROLLER => Ok(Self::MultimediaController(MultimediaControllerType::MultimediaAudioController)),
-                SubClass::MultimediaController::COMPUTER_TELEPHONY_DEVICE => Ok(Self::MultimediaController(MultimediaControllerType::ComputerTelephonyDevice)),
-                SubClass::MultimediaController::AUDIO_DEVICE => Ok(Self::MultimediaController(MultimediaControllerType::AudioDevice)),
-                SubClass::MultimediaController::OTHER => Ok(Self::MultimediaController(MultimediaControllerType::Other)),
+                SubClass::MultimediaController::MULTIMEDIA_VIDEO_CONTROLLER => Ok(
+                    Self::MultimediaController(MultimediaControllerType::MultimediaVideoController),
+                ),
+                SubClass::MultimediaController::MULTIMEDIA_AUDIO_CONTROLLER => Ok(
+                    Self::MultimediaController(MultimediaControllerType::MultimediaAudioController),
+                ),
+                SubClass::MultimediaController::COMPUTER_TELEPHONY_DEVICE => Ok(
+                    Self::MultimediaController(MultimediaControllerType::ComputerTelephonyDevice),
+                ),
+                SubClass::MultimediaController::AUDIO_DEVICE => Ok(Self::MultimediaController(
+                    MultimediaControllerType::AudioDevice,
+                )),
+                SubClass::MultimediaController::OTHER => {
+                    Ok(Self::MultimediaController(MultimediaControllerType::Other))
+                }
                 _ => Err((class_code, subclass_code, prog_if)),
-            }
+            },
             ClassCode::MEMORY_CONTROLLER => match subclass_code {
-                SubClass::MemoryController::RAM_CONTROLLER => Ok(Self::MemoryController(MemoryControllerType::RamController)),
-                SubClass::MemoryController::FLASH_CONTROLLER => Ok(Self::MemoryController(MemoryControllerType::FlashController)),
-                SubClass::MemoryController::OTHER => Ok(Self::MemoryController(MemoryControllerType::Other)),
+                SubClass::MemoryController::RAM_CONTROLLER => {
+                    Ok(Self::MemoryController(MemoryControllerType::RamController))
+                }
+                SubClass::MemoryController::FLASH_CONTROLLER => Ok(Self::MemoryController(
+                    MemoryControllerType::FlashController,
+                )),
+                SubClass::MemoryController::OTHER => {
+                    Ok(Self::MemoryController(MemoryControllerType::Other))
+                }
                 _ => Err((class_code, subclass_code, prog_if)),
-            }
+            },
             ClassCode::BRIDGE => match subclass_code {
                 SubClass::Bridge::HOST_BRIDGE => Ok(Self::Bridge(BridgeType::HostBridge)),
                 SubClass::Bridge::ISA_BRIDGE => Ok(Self::Bridge(BridgeType::IsaBridge)),
@@ -197,9 +243,7 @@ impl DeviceType {
                         0x1 => Some(PciBridgeDecodeMode::SubtractiveDecode),
                         _ => None,
                     } {
-                        Ok(Self::Bridge(
-                            BridgeType::PciToPciBridge { decode_mode }
-                        ))
+                        Ok(Self::Bridge(BridgeType::PciToPciBridge { decode_mode }))
                     } else {
                         Err((class_code, subclass_code, prog_if))
                     }
@@ -213,9 +257,7 @@ impl DeviceType {
                         0x1 => Some(RaceWayBridgeMode::Endpoint),
                         _ => None,
                     } {
-                        Ok(Self::Bridge(
-                            BridgeType::RaceWayBridge { mode }
-                        ))
+                        Ok(Self::Bridge(BridgeType::RaceWayBridge { mode }))
                     } else {
                         Err((class_code, subclass_code, prog_if))
                     }
@@ -226,17 +268,19 @@ impl DeviceType {
                         0x80 => Some(CpuFacingBus::Secondary),
                         _ => None,
                     } {
-                        Ok(Self::Bridge(
-                            BridgeType::SemiTransparentPciToPciBridge { cpu_facing_bus }
-                        ))
+                        Ok(Self::Bridge(BridgeType::SemiTransparentPciToPciBridge {
+                            cpu_facing_bus,
+                        }))
                     } else {
                         Err((class_code, subclass_code, prog_if))
                     }
                 }
-                SubClass::Bridge::INFINIBAND_TO_PCI_HOST_BRIDGE => Ok(Self::Bridge(BridgeType::InfinibandToPciHostBridge)),
+                SubClass::Bridge::INFINIBAND_TO_PCI_HOST_BRIDGE => {
+                    Ok(Self::Bridge(BridgeType::InfinibandToPciHostBridge))
+                }
                 SubClass::Bridge::OTHER => Ok(Self::Bridge(BridgeType::Other)),
                 _ => Err((class_code, subclass_code, prog_if)),
-            }
+            },
             ClassCode::SIMPLE_COMMUNICATION_CONTROLLER => Ok(Self::SimpleCommunicationController),
             ClassCode::BASE_SYSTEM_PERIPHERAL => Ok(Self::BaseSystemPeripheral),
             ClassCode::INPUT_DEVICE_CONTROLLER => Ok(Self::InputDeviceController),
@@ -395,18 +439,12 @@ pub enum BridgeType {
     IsaBridge,
     EisaBridge,
     McaBridge,
-    PciToPciBridge {
-        decode_mode: PciBridgeDecodeMode,
-    },
+    PciToPciBridge { decode_mode: PciBridgeDecodeMode },
     PcmciaBridge,
     NuBusBridge,
     CardBusBridge,
-    RaceWayBridge {
-        mode: RaceWayBridgeMode,
-    },
-    SemiTransparentPciToPciBridge {
-        cpu_facing_bus: CpuFacingBus,
-    },
+    RaceWayBridge { mode: RaceWayBridgeMode },
+    SemiTransparentPciToPciBridge { cpu_facing_bus: CpuFacingBus },
     InfinibandToPciHostBridge,
     Other,
 }

@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 //use rsos::acpi::Rsdp;
 use crate::acpi::Rsdp;
 
-use super::{raw::tables::ConfigurationTableEntry, Guid};
+use super::{Guid, raw::tables::ConfigurationTableEntry};
 
 pub struct ConfigurationTable<'a> {
     count: usize,

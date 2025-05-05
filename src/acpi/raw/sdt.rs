@@ -17,7 +17,9 @@ impl SdtHeader {
         let ptr = self as *const SdtHeader;
         let ptr = ptr as *const u8;
         let size = self.length as usize;
-        let sum = (0..size).map(|i| unsafe { *ptr.add(i) } as usize).sum::<usize>();
+        let sum = (0..size)
+            .map(|i| unsafe { *ptr.add(i) } as usize)
+            .sum::<usize>();
 
         return sum & 0xFF == 0;
     }
