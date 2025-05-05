@@ -51,7 +51,8 @@ impl Xsdt {
         if index >= self.len() {
             return None;
         }
-        let ptr = unsafe { (self as *const Xsdt as *const u64).byte_add(mem::size_of::<SdtHeader>()) };
+        let ptr =
+            unsafe { (self as *const Xsdt as *const u64).byte_add(mem::size_of::<SdtHeader>()) };
         let item = unsafe { ptr.read_unaligned() } as *const SdtHeader;
         return Some(item);
     }
