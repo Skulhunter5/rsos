@@ -1,9 +1,6 @@
 use core::fmt::Write;
 
-use crate::{
-    io::{inb, outb},
-    spin,
-};
+use rsos::{io::{inb, outb}, spin};
 
 pub unsafe fn init() {
     unsafe {

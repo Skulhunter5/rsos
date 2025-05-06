@@ -7,16 +7,18 @@ extern crate alloc;
 
 use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
+use ahci::AhciController;
 use alloc::alloc::Global;
-use rsos::acpi::AcpiTables;
+use rsos::{
+    acpi::AcpiTables,
+    pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
+};
 use uefi::{
     SystemTable,
     raw::{self, ImageHandle},
 };
 
-mod io;
-mod pci;
-mod spin;
+mod ahci;
 mod uart;
 pub mod uefi;
 
@@ -163,12 +165,22 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
         println!("{:?}", table);
     }
 
-    println!();
-    println!("PCI:");
-    unsafe {
-        pci::test();
+    let mut storage_device = None;
+    for device in unsafe { pci::enumerate() } {
+        match device.device_type().unwrap() {
+            DeviceType::MassStorageController(MassStorageControllerType::SataController {
+                interface: SataControllerInterface::Ahci,
+            }) => {
+                storage_device = Some(device);
+                break;
+            }
+            _ => {}
+        }
     }
-    //println!("- VendorId: {:#x}", Pci::get_vendor_id(0, 0, 0));
+    let storage_device = storage_device.expect("failed to find ahci controller pci device during enumeration");
+
+    let ahci_controller = AhciController::try_from(storage_device).expect("failed to create AhciController");
+    println!("{:?}", &ahci_controller);
 
     loop {}
 }
