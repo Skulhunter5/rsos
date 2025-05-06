@@ -1,7 +1,6 @@
 use core::marker::PhantomData;
 
-//use rsos::acpi::Rsdp;
-use crate::acpi::Rsdp;
+use rsos::acpi::Rsdp;
 
 use super::{Guid, raw::tables::ConfigurationTableEntry};
 

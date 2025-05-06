@@ -2,15 +2,13 @@
 #![no_main]
 #![feature(allocator_api)]
 #![feature(inline_const_pat)]
-#![feature(ptr_metadata)]
 
 extern crate alloc;
 
 use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
 use alloc::alloc::Global;
-//use rsos::acpi::AcpiTables;
-use crate::acpi::AcpiTables;
+use rsos::acpi::AcpiTables;
 use uefi::{
     SystemTable,
     raw::{self, ImageHandle},
@@ -21,8 +19,6 @@ mod pci;
 mod spin;
 mod uart;
 pub mod uefi;
-
-mod acpi;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
