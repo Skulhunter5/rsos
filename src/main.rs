@@ -181,6 +181,8 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
 
     let ahci_controller = AhciController::try_from(storage_device).expect("failed to create AhciController");
     println!("{:?}", &ahci_controller);
+    println!("CAP.S64A: {}", ahci_controller.ghc_cap() & (1 << 31) != 0);
+    println!("GHC.AE: {}", ahci_controller.ghc_ghc() & (1 << 31) != 0);
 
     loop {}
 }
