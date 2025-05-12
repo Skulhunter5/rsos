@@ -35,3 +35,14 @@ impl AhciController {
         ghc
     }
 }
+
+#[derive(Debug)]
+#[repr(C, packed)]
+pub struct CommandHeader {
+    flags: u16,
+    prdtl: u16,
+    prdbc: u32,
+    ctba: u32,
+    ctbau: u32,
+    reserved: [u32; 4],
+}
