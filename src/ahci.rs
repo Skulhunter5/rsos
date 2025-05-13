@@ -30,7 +30,7 @@ impl AhciController {
         Some(Self { device, abar })
     }
 
-    pub fn generic_host_control(&self) -> GenericHostControl {
+    pub fn generic_host_control(&mut self) -> GenericHostControl {
         GenericHostControl::new(self)
     }
 
@@ -49,22 +49,26 @@ impl AhciController {
 
 #[derive(Debug)]
 pub struct GenericHostControl<'a> {
-    //controller: &'a AhciController,
     base_ptr: *const u8,
-    marker: PhantomData<&'a AhciController>,
-    //abar: *const u32,
-    //device: &'a PciDevice,
+    controller: &'a mut AhciController,
+    //_marker: PhantomData<&'a mut AhciController>,
 }
 
+#[allow(unused)]
 impl<'a> GenericHostControl<'a> {
-    fn new(controller: &'a AhciController) -> GenericHostControl<'a> {
+    fn new(controller: &'a mut AhciController) -> GenericHostControl<'a> {
         let base_ptr = controller.abar;
-        Self { base_ptr, marker: PhantomData }
+        //Self { base_ptr, _marker: PhantomData }
+        Self { base_ptr, controller }
     }
 
     pub fn capabilities(&self) -> HostCapabilities {
         let ptr = unsafe { self.base_ptr.add(0) } as *const u32;
         return HostCapabilities(unsafe { ptr.read_volatile() });
+    }
+
+    pub fn global_hba_control(&self) -> GlobalHbaControl {
+        GlobalHbaControl::new(self)
     }
 }
 
@@ -146,6 +150,19 @@ impl TryFrom<u8> for InterfaceSpeed {
             0b0011 => Ok(Self::Gen3),
             x => Err(x),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct GlobalHbaControl<'a> {
+    base_ptr: *const u8,
+    _marker: PhantomData<&'a GenericHostControl<'a>>,
+}
+
+impl<'a> GlobalHbaControl<'a> {
+    fn new(ghc: &GenericHostControl) -> Self {
+        let base_ptr = unsafe { ghc.controller.abar.add(0x4) };
+        Self { base_ptr, _marker: PhantomData }
     }
 }
 
