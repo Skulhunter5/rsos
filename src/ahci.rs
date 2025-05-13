@@ -149,19 +149,6 @@ impl TryFrom<u8> for InterfaceSpeed {
     }
 }
 
-//impl HostCapabilities {
-//    const OFFSET_S64A: usize = 31;
-//    const OFFSET_SNCQ: usize = 30;
-//
-//    pub fn s64a(&self) -> bool {
-//        self.0 & (1 << Self::OFFSET_S64A) != 0
-//    }
-//
-//    pub fn sncq(&self) -> bool {
-//        self.0 & (1 << Self::OFFSET_SNCQ) != 0
-//    }
-//}
-
 #[derive(Debug)]
 #[repr(C, packed)]
 pub struct CommandHeader {
