@@ -22,12 +22,19 @@ impl AhciController {
             return None;
         }
 
-        let command_list = alloc::vec::Vec::<CommandHeader>::with_capacity(32);
-        for i in 0..32 {
-            todo!();
-        }
+        // let command_list = alloc::vec::Vec::<CommandHeader>::with_capacity(32);
+        // for i in 0..32 {
+        //     todo!();
+        // }
 
-        Some(Self { device, abar })
+        let mut controller = Self { device, abar };
+
+        // let self = Some(Self { device, abar })
+
+        let caps = controller.generic_host_control().capabilities();
+        crate::println!("CAP.SAM: {}", caps.sam());
+
+        Some(controller)
     }
 
     pub fn generic_host_control(&mut self) -> GenericHostControl {
@@ -50,16 +57,14 @@ impl AhciController {
 #[derive(Debug)]
 pub struct GenericHostControl<'a> {
     base_ptr: *const u8,
-    controller: &'a mut AhciController,
-    //_marker: PhantomData<&'a mut AhciController>,
+    _marker: PhantomData<&'a mut AhciController>,
 }
 
 #[allow(unused)]
 impl<'a> GenericHostControl<'a> {
     fn new(controller: &'a mut AhciController) -> GenericHostControl<'a> {
         let base_ptr = controller.abar;
-        //Self { base_ptr, _marker: PhantomData }
-        Self { base_ptr, controller }
+        Self { base_ptr, _marker: PhantomData }
     }
 
     pub fn capabilities(&self) -> HostCapabilities {
@@ -67,7 +72,7 @@ impl<'a> GenericHostControl<'a> {
         return HostCapabilities(unsafe { ptr.read_volatile() });
     }
 
-    pub fn global_hba_control(&self) -> GlobalHbaControl {
+    pub fn global_hba_control(&mut self) -> GlobalHbaControl {
         GlobalHbaControl::new(self)
     }
 }
@@ -155,14 +160,38 @@ impl TryFrom<u8> for InterfaceSpeed {
 
 #[derive(Debug)]
 pub struct GlobalHbaControl<'a> {
-    base_ptr: *const u8,
-    _marker: PhantomData<&'a GenericHostControl<'a>>,
+    ptr: *mut u32,
+    _marker: PhantomData<&'a mut GenericHostControl<'a>>,
 }
 
+#[allow(unused)]
 impl<'a> GlobalHbaControl<'a> {
     fn new(ghc: &GenericHostControl) -> Self {
-        let base_ptr = unsafe { ghc.controller.abar.add(0x4) };
-        Self { base_ptr, _marker: PhantomData }
+        // let ptr = unsafe { ghc.controller.abar.add(0x4) } as *mut u32;
+        let ptr = unsafe { ghc.base_ptr.add(0x4) } as *mut u32;
+        Self { ptr, _marker: PhantomData }
+    }
+
+    fn read(&self) -> u32 {
+        unsafe { self.ptr.read_volatile() }
+    }
+
+    fn write(&mut self, val: u32) {
+        unsafe { self.ptr.write_volatile(val) }
+    }
+
+    pub fn ae(&self) -> bool {
+        self.read() & (1 << 31) != 0
+    }
+
+    pub fn set_ae(&mut self, enabled: bool) {
+        let old = self.read();
+        let new = if enabled {
+            old | (1 << 31)
+        } else {
+            old & !(1 << 31)
+        };
+        self.write(new);
     }
 }
 
