@@ -29,10 +29,12 @@ impl AhciController {
 
         let mut controller = Self { device, abar };
 
-        // let self = Some(Self { device, abar })
-
         let caps = controller.generic_host_control().capabilities();
         crate::println!("CAP.SAM: {}", caps.sam());
+
+        crate::println!("Beginning HBA reset...");
+        controller.generic_host_control().global_hba_control().reset_and_wait();
+        crate::println!("> reset complete");
 
         Some(controller)
     }
@@ -184,14 +186,54 @@ impl<'a> GlobalHbaControl<'a> {
         self.read() & (1 << 31) != 0
     }
 
-    pub fn set_ae(&mut self, enabled: bool) {
-        let old = self.read();
-        let new = if enabled {
-            old | (1 << 31)
-        } else {
-            old & !(1 << 31)
-        };
-        self.write(new);
+    pub fn enable_ahci_mode(&mut self) {
+        if self.ae() {
+            return;
+        }
+
+        // According to the spec, you shall not access any other AHCI registers when not in ahci
+        // mode, therefore there shouldn't be any flags set previously to enabling ahci mode
+        self.write(1 << 31);
+    }
+
+    pub fn disable_ahci_mode(&mut self) {
+        if !self.ae() {
+            return;
+        }
+
+        // According to the spec, for disabling ahci mode, you shall write 0 to the register
+        self.write(0);
+    }
+
+    pub fn mrsm(&self) -> bool {
+        self.read() & (1 << 2) != 0
+    }
+
+    pub fn ie(&self) -> bool {
+        self.read() & (1 << 1) != 0
+    }
+
+    pub fn enable_interrupts(&mut self) {
+        self.write(self.read() | (1 << 1));
+    }
+
+    pub fn disable_interrupts(&mut self) {
+        self.write(self.read() & !(1 << 1));
+    }
+
+    pub fn hr(&self) -> bool {
+        self.read() & (1 << 0) != 0
+    }
+
+    pub fn reset(&mut self) {
+        self.write(self.read() | (1 << 0));
+    }
+
+    pub fn reset_and_wait(&mut self) {
+        self.reset();
+        while self.hr() {
+            core::hint::spin_loop();
+        }
     }
 }
 
