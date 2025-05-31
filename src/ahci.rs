@@ -5,7 +5,7 @@ use rsos::pci::{DeviceType, MassStorageControllerType, PciDevice, SataController
 #[derive(Debug)]
 pub struct AhciController {
     device: PciDevice,
-    abar: *const u8,
+    abar: *const (),
 }
 
 impl AhciController {
@@ -17,17 +17,13 @@ impl AhciController {
             Ok(_) | Err(_) => return None,
         }
 
-        let abar = device.bar5() as *const u8;
+        let abar = device.bar5() as *const ();
         if abar.is_null() {
             return None;
         }
 
-        // let command_list = alloc::vec::Vec::<CommandHeader>::with_capacity(32);
-        // for i in 0..32 {
-        //     todo!();
-        // }
-
         let mut controller = Self { device, abar };
+        controller.init();
 
         let caps = controller.generic_host_control().capabilities();
         crate::println!("CAP.SAM: {}", caps.sam());
@@ -39,26 +35,45 @@ impl AhciController {
         Some(controller)
     }
 
+    fn init(&mut self) {
+        let port_count = self.generic_host_control().capabilities().port_count() as usize;
+        for port in 0..port_count {
+            let command_list = alloc::vec![CommandHeader {
+                flags: 0,
+                prdtl: 0,
+                prdbc: 0,
+                ctba: 0,
+                ctbau: 0,
+                reserved: [0; 4],
+            }; 32].into_boxed_slice();
+
+            let received_fis = alloc::vec![0; 4096].into_boxed_slice();
+
+            self.init_port(port);
+        }
+    }
+
+    fn init_port(&mut self, port: usize) {
+        let mut registers = self.port_register(port);
+        crate::println!("Port {} ST: {}", port, registers.cmd().st());
+    }
+
+    pub fn get_port(&mut self, port: usize) -> Port {
+        todo!();
+    }
+
     pub fn generic_host_control(&mut self) -> GenericHostControl {
         GenericHostControl::new(self)
     }
 
-    pub fn ghc_cap(&self) -> u32 {
-        let ptr = self.abar as *const u32;
-        let cap = unsafe { ptr.read_volatile() };
-        cap
-    }
-
-    pub fn ghc_ghc(&self) -> u32 {
-        let ptr = unsafe { self.abar.add(4) } as *const u32;
-        let ghc = unsafe { ptr.read_volatile() };
-        ghc
+    fn port_register(&mut self, port: usize) -> PortRegisters {
+        PortRegisters::new(self, port)
     }
 }
 
 #[derive(Debug)]
 pub struct GenericHostControl<'a> {
-    base_ptr: *const u8,
+    base_ptr: *const (),
     _marker: PhantomData<&'a mut AhciController>,
 }
 
@@ -70,7 +85,7 @@ impl<'a> GenericHostControl<'a> {
     }
 
     pub fn capabilities(&self) -> HostCapabilities {
-        let ptr = unsafe { self.base_ptr.add(0) } as *const u32;
+        let ptr = unsafe { self.base_ptr.byte_add(0) } as *const u32;
         return HostCapabilities(unsafe { ptr.read_volatile() });
     }
 
@@ -169,8 +184,7 @@ pub struct GlobalHbaControl<'a> {
 #[allow(unused)]
 impl<'a> GlobalHbaControl<'a> {
     fn new(ghc: &GenericHostControl) -> Self {
-        // let ptr = unsafe { ghc.controller.abar.add(0x4) } as *mut u32;
-        let ptr = unsafe { ghc.base_ptr.add(0x4) } as *mut u32;
+        let ptr = unsafe { ghc.base_ptr.byte_add(0x4) } as *mut u32;
         Self { ptr, _marker: PhantomData }
     }
 
@@ -238,12 +252,105 @@ impl<'a> GlobalHbaControl<'a> {
 }
 
 #[derive(Debug)]
+pub struct Port {
+}
+
+#[derive(Debug)]
+struct PortRegisters<'a> {
+    base_ptr: *const (),
+    _marker: PhantomData<&'a mut AhciController>
+}
+
+#[allow(unused)]
+impl PortRegisters<'_> {
+    fn new(controller: &mut AhciController, port: usize) -> Self {
+        let base_ptr = unsafe { controller.abar.byte_add(0x100 + 0x80 * port) };
+        Self { base_ptr, _marker: PhantomData }
+    }
+
+    pub fn cmd(&mut self) -> PortCmd {
+        PortCmd::new(self)
+    }
+}
+
+#[derive(Debug)]
+struct PortCmd<'a> {
+    ptr: *mut u32,
+    _marker: PhantomData<&'a mut AhciController>,
+}
+
+#[allow(unused)]
+impl PortCmd<'_> {
+    fn new(registers: &mut PortRegisters) -> Self {
+        let ptr = unsafe { registers.base_ptr.byte_add(0x18) } as *mut u32;
+        Self { ptr, _marker: PhantomData }
+    }
+
+    fn read(&self) -> u32 {
+        unsafe { self.ptr.read_volatile() }
+    }
+
+    fn write(&mut self, val: u32) {
+        unsafe { self.ptr.write_volatile(val) }
+    }
+
+    const ST_BIT: u32 = 1 << 0;
+
+    pub fn st(&self) -> bool {
+        self.read() & Self::ST_BIT != 0
+    }
+
+    pub fn start(&mut self) {
+        self.write(self.read() | Self::ST_BIT);
+    }
+
+    pub fn stop(&mut self) {
+        self.write(self.read() & !Self::ST_BIT);
+    }
+
+    const FRE_BIT: u32 = 1 << 4;
+
+    pub fn fre(&self) -> bool {
+        self.read() & Self::FRE_BIT != 0
+    }
+
+    pub fn enable_fre(&mut self) {
+        self.write(self.read() | Self::FRE_BIT);
+    }
+
+    pub fn disable_fre(&mut self) {
+        self.write(self.read() & !Self::FRE_BIT);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
-pub struct CommandHeader {
+struct CommandHeader {
     flags: u16,
     prdtl: u16,
     prdbc: u32,
     ctba: u32,
     ctbau: u32,
     reserved: [u32; 4],
+}
+
+type CommandFis = [u8; 64];
+type AtapiCommand = [u8; 16];
+
+// #[derive(Debug)]
+#[repr(C, packed)]
+struct CommandTable {
+    cfis: CommandFis,
+    acmd: AtapiCommand,
+    reserved: [u8; 0x30],
+    prdts: [Prdt],
+}
+
+#[derive(Debug)]
+#[repr(C, packed)]
+struct Prdt {
+    dba: u32,
+    dbau: u32,
+    reserved: u32,
+    dw3: u32,
 }

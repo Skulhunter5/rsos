@@ -178,10 +178,13 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     }
     let storage_device = storage_device.expect("failed to find ahci controller pci device during enumeration");
 
-    let ahci_controller = AhciController::try_from(storage_device).expect("failed to create AhciController");
+    let mut ahci_controller = AhciController::try_from(storage_device).expect("failed to create AhciController");
     println!("{:?}", &ahci_controller);
-    println!("CAP.S64A: {}", ahci_controller.ghc_cap() & (1 << 31) != 0);
-    println!("GHC.AE: {}", ahci_controller.ghc_ghc() & (1 << 31) != 0);
+    let cap = ahci_controller.generic_host_control().capabilities();
+    println!("CAP.S64A: {}", cap.s64a());
+    let mut ghc = ahci_controller.generic_host_control();
+    let ghc = ghc.global_hba_control();
+    println!("GHC.AE: {}", ghc.ae());
 
     loop {}
 }
