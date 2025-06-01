@@ -6,6 +6,8 @@ use rsos::pci::{DeviceType, MassStorageControllerType, PciDevice, SataController
 pub struct AhciController {
     device: PciDevice,
     abar: *const (),
+    capabilities: HostCapabilities,
+    ports: [Option<Port>; 32],
 }
 
 impl AhciController {
@@ -22,7 +24,11 @@ impl AhciController {
             return None;
         }
 
-        let mut controller = Self { device, abar };
+        let capabilities = Self::read_caps(abar);
+
+        let ports = [const { None }; 32];
+
+        let mut controller = Self { device, abar, ports, capabilities };
         controller.init();
 
         let caps = controller.generic_host_control().capabilities();
@@ -35,9 +41,14 @@ impl AhciController {
         Some(controller)
     }
 
+    fn read_caps(abar: *const ()) -> HostCapabilities {
+        HostCapabilities(unsafe { (abar as *const u32).read_volatile() })
+    }
+
     fn init(&mut self) {
         let port_count = self.generic_host_control().capabilities().port_count() as usize;
         for port in 0..port_count {
+            // TODO: ensure the required alignment for the interface structures
             let command_list = alloc::vec![CommandHeader {
                 flags: 0,
                 prdtl: 0,
@@ -53,20 +64,29 @@ impl AhciController {
         }
     }
 
-    fn init_port(&mut self, port: usize) {
-        let mut registers = self.port_register(port);
-        crate::println!("Port {} ST: {}", port, registers.cmd().st());
+    fn init_port(&mut self, index: usize) {
+        let mut registers = unsafe { self.port_registers(index) };
+        crate::println!("Port {} ST: {}", index, registers.cmd().st());
+        let port = Port::new(self, index);
+        self.ports[index] = Some(port);
     }
 
-    pub fn get_port(&mut self, port: usize) -> Port {
-        todo!();
+    pub unsafe fn get_port(&mut self, port: usize) -> Option<&mut Port> {
+        if port >= self.ports.len() {
+            return None;
+        }
+        if let Some(ref mut port) = self.ports[port] {
+            return Some(port);
+        } else {
+            return None;
+        }
     }
 
     pub fn generic_host_control(&mut self) -> GenericHostControl {
         GenericHostControl::new(self)
     }
 
-    fn port_register(&mut self, port: usize) -> PortRegisters {
+    unsafe fn port_registers(&mut self, port: usize) -> PortRegisters {
         PortRegisters::new(self, port)
     }
 }
@@ -253,6 +273,30 @@ impl<'a> GlobalHbaControl<'a> {
 
 #[derive(Debug)]
 pub struct Port {
+    base_ptr: *const (),
+    s64a: bool,
+}
+
+impl Port {
+    fn new(controller: &AhciController, port: usize) -> Self {
+        let base_ptr = unsafe { controller.abar.byte_add(0x100 + 0x80 * port) };
+        let s64a = controller.capabilities.s64a();
+        Self { base_ptr, s64a }
+    }
+
+    fn set_clb(&mut self, address: u64) {
+        let lower = address as u32;
+        let upper = (address >> 32) as u32;
+
+        let clb_ptr = self.base_ptr as *mut u32;
+        unsafe { clb_ptr.write_volatile(lower) };
+        if self.s64a {
+            let clbu_ptr = unsafe { clb_ptr.byte_add(0x4) } as *mut u32;
+            unsafe { clbu_ptr.write_volatile(upper); }
+        } else if upper != 0 {
+            panic!("tried to write {} (> 4 GiB) to PxCLB(U) with CAP.S64A == false", address);
+        }
+    }
 }
 
 #[derive(Debug)]
