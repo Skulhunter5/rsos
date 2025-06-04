@@ -47,18 +47,23 @@ impl AhciController {
 
     fn init(&mut self) {
         let port_count = self.generic_host_control().capabilities().port_count() as usize;
+        let pi = self.generic_host_control().ports_implemented();
         for port in 0..port_count {
-            // TODO: ensure the required alignment for the interface structures
-            let command_list = alloc::vec![CommandHeader {
-                flags: 0,
-                prdtl: 0,
-                prdbc: 0,
-                ctba: 0,
-                ctbau: 0,
-                reserved: [0; 4],
-            }; 32].into_boxed_slice();
+            if !pi.is_port_implemented(port) {
+                continue;
+            }
 
-            let received_fis = alloc::vec![0; 4096].into_boxed_slice();
+            // TODO: ensure the required alignment for the interface structures
+            // let command_list = alloc::vec![CommandHeader {
+            //     flags: 0,
+            //     prdtl: 0,
+            //     prdbc: 0,
+            //     ctba: 0,
+            //     ctbau: 0,
+            //     reserved: [0; 4],
+            // }; 32].into_boxed_slice();
+            //
+            // let received_fis = alloc::vec![0; 4096].into_boxed_slice();
 
             self.init_port(port);
         }
@@ -67,7 +72,7 @@ impl AhciController {
     fn init_port(&mut self, index: usize) {
         let mut registers = unsafe { self.port_registers(index) };
         crate::println!("Port {} ST: {}", index, registers.cmd().st());
-        let port = Port::new(self, index);
+        let port = Port::init(self, index);
         self.ports[index] = Some(port);
     }
 
@@ -99,14 +104,24 @@ pub struct GenericHostControl<'a> {
 
 #[allow(unused)]
 impl<'a> GenericHostControl<'a> {
+    const OFFSET_GHC: usize = 0;
+    const OFFSET_PI: usize = 0xC;
+
     fn new(controller: &'a mut AhciController) -> GenericHostControl<'a> {
         let base_ptr = controller.abar;
         Self { base_ptr, _marker: PhantomData }
     }
 
     pub fn capabilities(&self) -> HostCapabilities {
-        let ptr = unsafe { self.base_ptr.byte_add(0) } as *const u32;
+
+        let ptr = unsafe { self.base_ptr.byte_add(Self::OFFSET_GHC) } as *const u32;
         return HostCapabilities(unsafe { ptr.read_volatile() });
+    }
+
+    pub fn ports_implemented(&self) -> ImplementedPorts {
+
+        let ptr = unsafe { self.base_ptr.byte_add(Self::OFFSET_GHC).byte_add(Self::OFFSET_PI) } as *const u32;
+        return ImplementedPorts(unsafe { ptr.read_volatile() });
     }
 
     pub fn global_hba_control(&mut self) -> GlobalHbaControl {
@@ -114,6 +129,7 @@ impl<'a> GenericHostControl<'a> {
     }
 }
 
+// TODO: create custom Debug/Display impl
 #[derive(Debug, Clone, Copy)]
 pub struct HostCapabilities(u32);
 
@@ -192,6 +208,17 @@ impl TryFrom<u8> for InterfaceSpeed {
             0b0011 => Ok(Self::Gen3),
             x => Err(x),
         }
+    }
+}
+
+// TODO: create custom Debug/Display impl
+#[derive(Debug, Clone, Copy)]
+pub struct ImplementedPorts(u32);
+
+#[allow(unused)]
+impl ImplementedPorts {
+    pub fn is_port_implemented(&self, index: usize) -> bool {
+        self.0 & (1 << index) != 0
     }
 }
 
@@ -278,7 +305,7 @@ pub struct Port {
 }
 
 impl Port {
-    fn new(controller: &AhciController, port: usize) -> Self {
+    fn init(controller: &AhciController, port: usize) -> Self {
         let base_ptr = unsafe { controller.abar.byte_add(0x100 + 0x80 * port) };
         let s64a = controller.capabilities.s64a();
         Self { base_ptr, s64a }
