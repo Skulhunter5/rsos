@@ -189,7 +189,7 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     let ghc = ghc.global_hba_control();
     println!("GHC.AE: {}", ghc.ae());
 
-    let port = ahci_controller.get_port(5).unwrap();
+    let port = ahci_controller.get_port(0).unwrap();
     // println!("Port 0: {:?}", port);
     let mut buffer = [0u8; 4 * 1024];
     let buffer_size = buffer.len();

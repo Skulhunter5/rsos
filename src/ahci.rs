@@ -75,20 +75,14 @@ impl AhciController {
     fn init(&mut self) {
         let port_count = self.generic_host_control().capabilities().port_count() as usize;
         let pi = self.generic_host_control().ports_implemented();
-        for port in 0..port_count {
-            if !pi.is_port_implemented(port) {
+        for index in 0..port_count {
+            if !pi.is_port_implemented(index) {
                 continue;
             }
 
-            self.init_port(port);
+            let port = Port::init(self, index);
+            self.ports[index] = Some(port);
         }
-    }
-
-    fn init_port(&mut self, index: usize) {
-        let mut registers = unsafe { self.port_registers(index) };
-        crate::println!("Port {} ST: {}", index, registers.cmd().st());
-        let port = Port::init(self, index);
-        self.ports[index] = Some(port);
     }
 
     pub fn get_port(&mut self, port: usize) -> Option<&mut Port> {
@@ -332,6 +326,8 @@ pub struct Port {
 
 impl Port {
     fn init(controller: &AhciController, port: usize) -> Self {
+        let port_index = port;
+
         let base_ptr = unsafe { controller.abar.byte_add(0x100 + 0x80 * port) };
         let s64a = controller.capabilities.s64a();
 
@@ -347,6 +343,8 @@ impl Port {
             fis_receive_area,
             command_table,
         };
+
+        crate::println!("Port {}: {:?}", port_index, port.status());
 
         port.setup();
 
@@ -442,6 +440,7 @@ impl Port {
         unsafe { ptr.write(bit_mask); }
         while unsafe { ptr.read() } & bit_mask != 0 {
             core::hint::spin_loop();
+            // crate::println!("> SERR: {:?}", self.error());
         }
     }
 
@@ -466,16 +465,17 @@ impl Port {
         }
         let acmd = [0; 16];
         let buffer_address = buffer.as_ptr() as u64;
-        let buffer_size = buffer.len() as u32;
+        // TODO: check that the -1 is correct and figure out why
+        let buffer_size = buffer.len() as u32 - 1;
         let prdts = [Prdt::new(buffer_address, buffer_size)];
 
         // let fis = RegisterFisH2D::new();
-        let command_table = CommandTable::new(fis, acmd, &prdts);
+        self.command_table = CommandTable::new(fis, acmd, &prdts);
 
         let mut command_header = self.command_list.data[command_slot as usize];
         command_header.flags = 5;
         command_header.prdtl = prdts.len() as u16;
-        let command_table_address = command_table.get_address();
+        let command_table_address = self.command_table.get_address();
         let ctba = command_table_address as u32;
         command_header.ctba = ctba;
         let ctbau = (command_table_address >> 32) as u32;
@@ -487,8 +487,116 @@ impl Port {
 
         self.run_command(command_slot);
 
+        crate::println!("HERE");
+
         // TODO: check for errors
     }
+
+    fn status(&self) -> SataStatus {
+        const OFFSET_SSTS: usize = 0x28;
+        let ptr = unsafe { self.base_ptr.byte_add(OFFSET_SSTS) } as *const u32;
+        SataStatus::try_from(unsafe { ptr.read_volatile() }).unwrap()
+    }
+
+    fn error(&self) -> SataError {
+        const OFFSET_SERR: usize = 0x30;
+        let ptr = unsafe { self.base_ptr.byte_add(OFFSET_SERR) } as *const u32;
+        SataError(unsafe { ptr.read_volatile() })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SataStatus {
+    ipm: Option<IpmState>,
+    spd: Option<InterfaceSpeed>,
+    det: DeviceDetection,
+}
+
+impl TryFrom<u32> for SataStatus {
+    type Error = u32;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        let ipm_bits = (value >> 8) & 0b1111;
+        let spd_bits = (value >> 4) & 0b1111;
+        let det_bits = value & 0b1111;
+        let ipm = match ipm_bits {
+            0 => None,
+            1 => Some(IpmState::Active),
+            2 => Some(IpmState::Partial),
+            6 => Some(IpmState::Slumber),
+            8 => Some(IpmState::DevSleep),
+            _ => return Err(value),
+        };
+        let spd = match spd_bits {
+            0 => None,
+            1 => Some(InterfaceSpeed::Gen1),
+            2 => Some(InterfaceSpeed::Gen2),
+            3 => Some(InterfaceSpeed::Gen3),
+            _ => return Err(value),
+        };
+        let det = match det_bits {
+            0 => DeviceDetection::NoDeviceDetected,
+            1 => DeviceDetection::DeviceDetected,
+            3 => DeviceDetection::PhyCommunicationEstablished,
+            4 => DeviceDetection::PhyOfflineMode,
+            _ => return Err(value),
+        };
+
+        Ok(Self { ipm, spd, det })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IpmState {
+    Active,
+    Partial,
+    Slumber,
+    DevSleep,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeviceDetection {
+    NoDeviceDetected,
+    DeviceDetected,
+    PhyCommunicationEstablished,
+    PhyOfflineMode,
+}
+
+// TODO: create custom Debug/Display impl
+#[derive(Debug, Clone, Copy)]
+struct SataError(u32);
+
+macro_rules! sata_error{
+    {$($flag:ident: $bit:expr),* $(,)?} => {
+        #[allow(unused)]
+        impl SataError {
+            $(
+                pub fn $flag(&self) -> bool {
+                    self.0 & (1 << $bit) != 0
+                }
+            )*
+        }
+    }
+}
+
+sata_error! {
+    exchanged: 26,
+    unknown_fis_type: 25,
+    transport_state_transition_error: 24,
+    link_sequence_error: 23,
+    handshake_error: 22,
+    crc_error: 21,
+    disparity_error: 20,
+    decode_10b_to_8b_error: 19,
+    comm_wake: 18,
+    phy_internal_error: 17,
+    phy_rdy_change: 16,
+    internal_error: 11,
+    protocol_error: 10,
+    persistent_communication_or_data_integrity_error: 9,
+    transient_data_integrity_error: 8,
+    recovered_communications_error: 1,
+    recovered_data_integrity_error: 0,
 }
 
 #[allow(unused)]
