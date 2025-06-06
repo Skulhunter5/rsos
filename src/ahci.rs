@@ -1,6 +1,17 @@
-use core::{marker::PhantomData, mem::MaybeUninit};
+use core::{
+    alloc::Layout,
+    fmt::Debug,
+    marker::PhantomData,
+    mem::{self, MaybeUninit}, ptr,
+};
 
-use alloc::boxed::Box;
+use alloc::{
+    alloc::{alloc, alloc_zeroed},
+    boxed::Box,
+    format,
+    string::String,
+    vec::Vec,
+};
 use rsos::pci::{DeviceType, MassStorageControllerType, PciDevice, SataControllerInterface};
 
 #[derive(Debug)]
@@ -76,15 +87,7 @@ impl AhciController {
     fn init_port(&mut self, index: usize) {
         let mut registers = unsafe { self.port_registers(index) };
         crate::println!("Port {} ST: {}", index, registers.cmd().st());
-        let mut port = Port::init(self, index);
-
-        let command_list = CommandList::new();
-        let fis_receive_area = Box::new(FisReceiveArea::new());
-        port.setup(
-            command_list.get_address(),
-            &*fis_receive_area as *const FisReceiveArea as u64,
-        );
-
+        let port = Port::init(self, index);
         self.ports[index] = Some(port);
     }
 
@@ -322,6 +325,9 @@ impl<'a> GlobalHbaControl<'a> {
 pub struct Port {
     base_ptr: *const (),
     s64a: bool,
+    command_list: CommandList,
+    fis_receive_area: Box<FisReceiveArea>,
+    command_table: Box<CommandTable>,
 }
 
 impl Port {
@@ -329,7 +335,31 @@ impl Port {
         let base_ptr = unsafe { controller.abar.byte_add(0x100 + 0x80 * port) };
         let s64a = controller.capabilities.s64a();
 
-        Self { base_ptr, s64a }
+        let command_list = CommandList::new();
+        let fis_receive_area = Box::new(FisReceiveArea::new());
+
+        let command_table = CommandTable::new([0; 64], [0; 16], &[]);
+
+        let mut port = Self {
+            base_ptr,
+            s64a,
+            command_list,
+            fis_receive_area,
+            command_table,
+        };
+
+        port.setup();
+
+        port
+    }
+
+    fn setup(&mut self) {
+        self.stop();
+
+        self.set_clb(self.command_list.get_address());
+        self.set_fb(&*self.fis_receive_area as *const FisReceiveArea as u64);
+
+        self.start();
     }
 
     fn set_clb(&mut self, address: u64) {
@@ -405,15 +435,111 @@ impl Port {
         cmd.disable_fre();
     }
 
-    fn setup(&mut self, clb: u64, fb: u64) {
-        self.stop();
+    fn run_command(&mut self, slot: u8) {
+        let bit_mask = 1 << slot;
 
-        self.set_clb(clb);
-        self.set_fb(fb);
+        let ptr = unsafe { self.base_ptr.byte_add(0x38) } as *mut u32;
+        unsafe { ptr.write(bit_mask); }
+        while unsafe { ptr.read() } & bit_mask != 0 {
+            core::hint::spin_loop();
+        }
+    }
 
-        self.start();
+    pub fn read(&mut self, buffer: &mut [u8], lba: u64, sector_count: u16) {
+        let command_slot = 0u8;
+
+        // Build read FIS
+        let mut fis = [0; 64];
+        {
+            fis[0] = FisType::RegisterH2D as u8;
+            fis[1] = 0x80;
+            fis[2] = 0x25;
+            fis[4] = lba as u8;
+            fis[5] = (lba >> 8) as u8;
+            fis[6] = (lba >> 16) as u8;
+            fis[7] = 1 << 6;
+            fis[8] = (lba >> 24) as u8;
+            fis[9] = (lba >> 32) as u8;
+            fis[10] = (lba >> 40) as u8;
+            fis[12] = sector_count as u8;
+            fis[13] = (sector_count >> 8) as u8;
+        }
+        let acmd = [0; 16];
+        let buffer_address = buffer.as_ptr() as u64;
+        let buffer_size = buffer.len() as u32;
+        let prdts = [Prdt::new(buffer_address, buffer_size)];
+
+        // let fis = RegisterFisH2D::new();
+        let command_table = CommandTable::new(fis, acmd, &prdts);
+
+        let mut command_header = self.command_list.data[command_slot as usize];
+        command_header.flags = 5;
+        command_header.prdtl = prdts.len() as u16;
+        let command_table_address = command_table.get_address();
+        let ctba = command_table_address as u32;
+        command_header.ctba = ctba;
+        let ctbau = (command_table_address >> 32) as u32;
+        if self.s64a {
+            command_header.ctbau = ctbau;
+        } else if ctbau != 0 {
+            panic!("tried to write {} (> 4 GiB) to CommandHeader.ctba(u) with CAP.S64A == false", command_table_address);
+        }
+
+        self.run_command(command_slot);
+
+        // TODO: check for errors
     }
 }
+
+#[allow(unused)]
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+enum FisType {
+    RegisterH2D = 0x27,
+    RegisterD2H = 0x34,
+    ActivateDma = 0x39,
+    SetupDma = 0x41,
+    Data = 0x46,
+    Bist = 0x58,
+    SetupPio = 0x5F,
+    DeviceBits = 0xA1,
+}
+
+// #[derive(Debug, Clone, Copy)]
+// #[repr(C)]
+// struct RegisterFisH2D {
+//     // DWORD 0
+//     ty: FisType,
+//     flags: u8,
+//     command: u8,
+//     feature_low: u8,
+//     // DWORD 1
+//     lba0: u8,
+//     lba1: u8,
+//     lba2: u8,
+//     device: u8,
+//     // DWORD 2
+//     lba3: u8,
+//     lba4: u8,
+//     lba5: u8,
+//     feature_high: u8,
+//     // DWORD 3
+//     count_low: u8,
+//     count_high: u8,
+//     icc: u8,
+//     control: u8,
+//     // DWORD 4
+//     reserved: [u8; 4],
+// }
+//
+// impl RegisterFisH2D {
+//     fn new() -> Self {
+//         Self {
+//             ty: FisType::RegisterH2D,
+//             flags: 0,
+//         }
+//     }
+// }
 
 #[derive(Debug)]
 struct PortRegisters<'a> {
@@ -520,7 +646,6 @@ struct CommandHeader {
 type CommandFis = [u8; 64];
 type AtapiCommand = [u8; 16];
 
-// #[derive(Debug)]
 #[repr(C, packed)]
 struct CommandTable {
     cfis: CommandFis,
@@ -529,13 +654,89 @@ struct CommandTable {
     prdts: [Prdt],
 }
 
-#[derive(Debug)]
+impl CommandTable {
+    fn new(cfis: CommandFis, acmd: AtapiCommand, prdts: &[Prdt]) -> Box<Self> {
+        let mut command_table = Self::zero(prdts.len());
+
+        command_table.cfis = cfis;
+        command_table.acmd = acmd;
+        for (i, prdt) in prdts.iter().enumerate() {
+            command_table.prdts[i] = *prdt;
+        }
+
+        command_table 
+    }
+
+    // TODO: check if this is correct
+    fn zero(prdt_count: usize) -> Box<Self> {
+        let size = mem::size_of::<CommandFis>()
+            + mem::size_of::<AtapiCommand>()
+            + mem::size_of::<[u8; 0x30]>()
+            + mem::size_of::<Prdt>() * prdt_count;
+        let layout = Layout::from_size_align(size, 128).unwrap();
+        let ptr = unsafe { alloc_zeroed(layout) };
+        if ptr.is_null() {
+            panic!("failed to allocate CommandTable (got a null-pointer)");
+        }
+        let ptr: *mut CommandTable = ptr::from_raw_parts_mut(ptr, prdt_count);
+
+        unsafe { Box::from_raw(ptr) }
+    }
+
+    fn get_address(&self) -> u64 {
+        &*self as *const CommandTable as *const () as usize as u64
+    }
+}
+
+impl Debug for CommandTable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "CommandTable {{ cfis: {:?}, acmd: {:?}, prdts: [",
+            self.cfis, self.acmd
+        )?;
+        write!(
+            f,
+            "{}] }}",
+            self.prdts
+                .iter()
+                .map(|prdt| format!("{:?}", prdt))
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
 struct Prdt {
     dba: u32,
     dbau: u32,
     reserved: u32,
     dw3: u32,
+}
+
+impl Prdt {
+    fn new(address: u64, count: u32) -> Self {
+        if address & 0x1 != 0 {
+            panic!("tried to create Prdt with address {}; must be word-aligned", address);
+        }
+        let dba = address as u32;
+        let dbau = (address >> 32) as u32;
+
+        const COUNT_MASK: u32 = 0b11_1111_1111_1111_1111_1111; // 22 bits
+        if count & !COUNT_MASK != 0 {
+            panic!("tried to create Prdt with size {} (> 4 MiB)", count) ;
+        }
+        let dw3 = count;
+
+        Self {
+            dba,
+            dbau,
+            reserved: 0,
+            dw3,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -554,12 +755,9 @@ impl CommandList {
             reserved: [0; 4],
         };
 
-        let layout = alloc::alloc::Layout::from_size_align(
-            core::mem::size_of::<[CommandHeader; 32]>(),
-            1024,
-        )
-        .unwrap();
-        let ptr = unsafe { alloc::alloc::alloc(layout) } as *mut [MaybeUninit<CommandHeader>; 32];
+        let layout =
+            Layout::from_size_align(core::mem::size_of::<[CommandHeader; 32]>(), 1024).unwrap();
+        let ptr = unsafe { alloc(layout) } as *mut [MaybeUninit<CommandHeader>; 32];
         let mut data = unsafe { Box::from_raw(ptr) };
 
         for item in data.iter_mut() {
@@ -581,6 +779,7 @@ impl CommandList {
 }
 
 // TODO: change FisReceiveArea size if support for FBSS is added
+#[derive(Debug)]
 #[repr(align(256))]
 pub struct FisReceiveArea([u8; 256]);
 

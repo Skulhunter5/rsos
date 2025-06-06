@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(allocator_api)]
+#![feature(ptr_metadata)]
 
 extern crate alloc;
 
@@ -181,15 +182,20 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
 
     let mut ahci_controller =
         AhciController::try_from(storage_device).expect("failed to create AhciController");
-    println!("{:?}", &ahci_controller);
+    // println!("{:?}", &ahci_controller);
     let cap = ahci_controller.generic_host_control().capabilities();
     println!("CAP.S64A: {}", cap.s64a());
     let mut ghc = ahci_controller.generic_host_control();
     let ghc = ghc.global_hba_control();
     println!("GHC.AE: {}", ghc.ae());
 
-    let port = ahci_controller.get_port(0).unwrap();
-    println!("Port 0: {:?}", port);
+    let port = ahci_controller.get_port(5).unwrap();
+    // println!("Port 0: {:?}", port);
+    let mut buffer = [0u8; 4 * 1024];
+    let buffer_size = buffer.len();
+    println!("Beginning read...");
+    port.read(&mut buffer, 0, buffer_size as u16);
+    println!("{:?}", buffer);
 
     loop {}
 }
