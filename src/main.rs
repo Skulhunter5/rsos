@@ -194,7 +194,7 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     let mut buffer = [0u8; 4 * 1024];
     let buffer_size = buffer.len();
     println!("Beginning read...");
-    port.read(&mut buffer, 0, buffer_size as u16);
+    port.read(&mut buffer, 0, 1);
     println!("{:?}", buffer);
 
     loop {}

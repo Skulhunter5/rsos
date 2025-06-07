@@ -23,7 +23,7 @@ pub struct AhciController {
 }
 
 impl AhciController {
-    pub fn try_from(device: PciDevice) -> Result<Self, &'static str> {
+    pub fn try_from(mut device: PciDevice) -> Result<Self, &'static str> {
         match device.device_type() {
             Ok(DeviceType::MassStorageController(MassStorageControllerType::SataController {
                 interface: SataControllerInterface::Ahci,
@@ -34,6 +34,10 @@ impl AhciController {
         let abar = device.bar5() as *const ();
         if abar.is_null() {
             return Err("abar is null");
+        }
+
+        if !device.bus_mastering() {
+            device.enable_bus_mastering();
         }
 
         let capabilities = Self::read_caps(abar);

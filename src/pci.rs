@@ -60,6 +60,10 @@ impl PciDevice {
         unsafe { Pci::config_read_u32(self.address, offset) }
     }
 
+    fn config_write_u32(&mut self, offset: u8, value: u32) {
+        unsafe { Pci::config_write_u32(self.address, offset, value) }
+    }
+
     pub fn vendor_id(&self) -> VendorId {
         unsafe { Pci::get_vendor_id(self.address) }
     }
@@ -76,6 +80,25 @@ impl PciDevice {
                 prog_if,
             }
         })
+    }
+
+    pub fn bus_mastering(&self) -> bool {
+        const BUS_MASTERING_BIT: u32 = 1 << 2;
+        self.config_read_u32(0x4) & BUS_MASTERING_BIT != 0
+    }
+
+    pub fn enable_bus_mastering(&mut self) {
+        const BUS_MASTERING_BIT: u32 = 1 << 2;
+        let old = self.config_read_u32(0x4);
+        let new = old | BUS_MASTERING_BIT;
+        self.config_write_u32(0x4, new);
+    }
+
+    pub fn disable_bus_mastering(&mut self) {
+        const BUS_MASTERING_BIT: u32 = 1 << 2;
+        let old = self.config_read_u32(0x4);
+        let new = old & !BUS_MASTERING_BIT;
+        self.config_write_u32(0x4, new);
     }
 
     pub fn bar0(&self) -> u32 {
@@ -117,11 +140,11 @@ impl Pci {
     }
 
     unsafe fn get_vendor_id(addr: PciAddress) -> VendorId {
-        unsafe { Self::config_read_u32_raw(addr.bus, addr.device, addr.function, 0) as u16 }
+        unsafe { Self::config_read_u32(addr, 0) as u16 }
     }
 
     unsafe fn get_device_id(addr: PciAddress) -> DeviceId {
-        (unsafe { Self::config_read_u32_raw(addr.bus, addr.device, addr.function, 0) }
+        (unsafe { Self::config_read_u32(addr, 0) }
             >> (8 * mem::size_of::<u16>())) as u16
     }
 
@@ -132,21 +155,6 @@ impl Pci {
         let prog_if = (val >> 8 & 0xFF) as u8;
 
         DeviceType::try_from(class_code, subclass_code, prog_if)
-    }
-
-    unsafe fn config_read_u16_raw(bus: u8, device: u8, function: u8, offset: u8) -> u16 {
-        let address = 0x80000000u32
-            | (offset as u32 & 0xFC)
-            | ((function as u32) << 8)
-            | ((device as u32) << 11)
-            | ((bus as u32) << 16);
-
-        unsafe {
-            outl(Self::PORT_CONFIG_ADDRESS, address);
-        }
-        let value = unsafe { inw(Self::PORT_CONFIG_DATA) };
-
-        value
     }
 
     unsafe fn config_read_u32(addr: PciAddress, offset: u8) -> u32 {
@@ -164,19 +172,17 @@ impl Pci {
         value
     }
 
-    unsafe fn config_read_u32_raw(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
+    unsafe fn config_write_u32(addr: PciAddress, offset: u8, value: u32) {
         let address = 0x80000000u32
             | (offset as u32 & 0xFC)
-            | ((function as u32 & 0b111) << 8)
-            | ((device as u32) << 11)
-            | ((bus as u32) << 16);
+            | ((addr.function as u32 & 0b111) << 8)
+            | ((addr.device as u32) << 11)
+            | ((addr.bus as u32) << 16);
 
         unsafe {
             outl(Self::PORT_CONFIG_ADDRESS, address);
         }
-        let value = unsafe { inl(Self::PORT_CONFIG_DATA) };
-
-        value
+        unsafe { outl(Self::PORT_CONFIG_DATA, value) };
     }
 }
 
