@@ -192,10 +192,10 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     let port = ahci_controller.get_port(0).unwrap();
     // println!("Port 0: {:?}", port);
     let mut buffer = [0u8; 4 * 1024];
-    let buffer_size = buffer.len();
+    let sector_count = 1;
     println!("Beginning read...");
-    port.read(&mut buffer, 0, 1);
-    println!("{:?}", buffer);
+    port.read(&mut buffer, 0, sector_count);
+    println!("{:x?}", &buffer[440..512]);
 
     loop {}
 }

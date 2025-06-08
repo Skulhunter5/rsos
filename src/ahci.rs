@@ -54,12 +54,12 @@ impl AhciController {
             capabilities,
         };
 
-        crate::println!("Beginning HBA reset...");
-        controller
-            .generic_host_control()
-            .global_hba_control()
-            .reset_and_wait();
-        crate::println!("> reset complete");
+        // crate::println!("Beginning HBA reset...");
+        // controller
+        //     .generic_host_control()
+        //     .global_hba_control()
+        //     .reset_and_wait();
+        // crate::println!("> reset complete");
 
         // Make sure that AHCI mode is enabled
         if !capabilities.sam() {
@@ -364,6 +364,22 @@ impl Port {
         self.start();
     }
 
+    fn get_clb(&self) -> u64 {
+        let clb_ptr = unsafe { self.base_ptr.byte_add(0) } as *const u32;
+        let clbu_ptr = unsafe { clb_ptr.add(1) };
+        let clb = unsafe { clb_ptr.read_volatile() } as u64;
+        let clbu = unsafe { clbu_ptr.read_volatile() } as u64;
+        (clbu << 32) | clb
+    }
+
+    fn get_fb(&self) -> u64 {
+        let fb_ptr = unsafe { self.base_ptr.byte_add(0x8) } as *const u32;
+        let fbu_ptr = unsafe { fb_ptr.add(1) };
+        let fb = unsafe { fb_ptr.read_volatile() } as u64;
+        let fbu = unsafe { fbu_ptr.read_volatile() } as u64;
+        (fbu << 32) | fb
+    }
+
     fn set_clb(&mut self, address: u64) {
         let lower = address as u32;
         let upper = (address >> 32) as u32;
@@ -375,7 +391,7 @@ impl Port {
             );
         }
 
-        let clb_ptr = self.base_ptr as *mut u32;
+        let clb_ptr = unsafe { self.base_ptr.byte_add(0) } as *mut u32;
         unsafe { clb_ptr.write_volatile(lower) };
         if self.s64a {
             let clbu_ptr = unsafe { clb_ptr.byte_add(0x4) } as *mut u32;
@@ -401,7 +417,7 @@ impl Port {
             );
         }
 
-        let fb_ptr = self.base_ptr as *mut u32;
+        let fb_ptr = unsafe { self.base_ptr.byte_add(0x8) } as *mut u32;
         unsafe { fb_ptr.write_volatile(lower) };
         if self.s64a {
             let fbu_ptr = unsafe { fb_ptr.byte_add(0x4) } as *mut u32;
@@ -441,9 +457,10 @@ impl Port {
         let bit_mask = 1 << slot;
 
         let ptr = unsafe { self.base_ptr.byte_add(0x38) } as *mut u32;
-        unsafe { ptr.write(bit_mask); }
-        while unsafe { ptr.read() } & bit_mask != 0 {
+        unsafe { ptr.write_volatile(bit_mask); }
+        while unsafe { ptr.read_volatile() } & bit_mask != 0 {
             core::hint::spin_loop();
+            // crate::println!("TFD: {:?}", self.tfd().busy());
             // crate::println!("> SERR: {:?}", self.error());
         }
     }
@@ -470,13 +487,16 @@ impl Port {
         let acmd = [0; 16];
         let buffer_address = buffer.as_ptr() as u64;
         // TODO: check that the -1 is correct and figure out why
+        assert!(buffer.len() > 0, "Buffer must not be empty");
+        let sector_size = 512;
+        assert_eq!(buffer.len() % sector_size, 0, "Buffer must be sector-aligned");
         let buffer_size = buffer.len() as u32 - 1;
         let prdts = [Prdt::new(buffer_address, buffer_size)];
 
         // let fis = RegisterFisH2D::new();
         self.command_table = CommandTable::new(fis, acmd, &prdts);
 
-        let mut command_header = self.command_list.data[command_slot as usize];
+        let command_header = &mut self.command_list.data[command_slot as usize];
         command_header.flags = 5;
         command_header.prdtl = prdts.len() as u16;
         let command_table_address = self.command_table.get_address();
@@ -506,6 +526,38 @@ impl Port {
         const OFFSET_SERR: usize = 0x30;
         let ptr = unsafe { self.base_ptr.byte_add(OFFSET_SERR) } as *const u32;
         SataError(unsafe { ptr.read_volatile() })
+    }
+
+    fn tfd(&self) -> TaskFileData {
+        const OFFSET_TFD: usize = 0x20;
+        let ptr = unsafe { self.base_ptr.byte_add(OFFSET_TFD) } as *const u32;
+        TaskFileData(unsafe { ptr.read_volatile() })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TaskFileData(u32);
+
+impl TaskFileData {
+    fn error(&self) -> Option<u8> {
+        let err = ((self.0 >> 0) & 0xFF) as u8;
+        if err != 0 {
+            return Some(err);
+        } else {
+            return None;
+        }
+    }
+
+    fn busy(&self) -> bool {
+        self.0 & (1 << 7) != 0
+    }
+
+    fn transfer_requested(&self) -> bool {
+        self.0 & (1 << 3) != 0
+    }
+
+    fn transfer_error(&self) -> bool {
+        self.0 & (1 << 0) != 0
     }
 }
 
