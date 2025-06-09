@@ -14,6 +14,8 @@ use alloc::{
 };
 use rsos::pci::{DeviceType, MassStorageControllerType, PciDevice, SataControllerInterface};
 
+use crate::disk::StorageDevice;
+
 #[derive(Debug)]
 pub struct AhciController {
     device: PciDevice,
@@ -439,6 +441,7 @@ impl Port {
         }
     }
 
+    // TODO: wait after setting CMD.FRE and CMD.ST
     fn start(&mut self) {
         let mut registers = self.registers();
         let mut cmd = registers.cmd();
@@ -446,6 +449,7 @@ impl Port {
         cmd.start();
     }
 
+    // TODO: wait after unsetting CMD.ST and CMD.FRE
     fn stop(&mut self) {
         let mut registers = self.registers();
         let mut cmd = registers.cmd();
@@ -460,12 +464,10 @@ impl Port {
         unsafe { ptr.write_volatile(bit_mask); }
         while unsafe { ptr.read_volatile() } & bit_mask != 0 {
             core::hint::spin_loop();
-            // crate::println!("TFD: {:?}", self.tfd().busy());
-            // crate::println!("> SERR: {:?}", self.error());
         }
     }
 
-    pub fn read(&mut self, buffer: &mut [u8], lba: u64, sector_count: u16) {
+    pub fn read(&mut self, buffer: &mut [u8], lba: u64, sector_count: u16) -> Result<(), &'static str> {
         let command_slot = 0u8;
 
         // Build read FIS
@@ -511,9 +513,8 @@ impl Port {
 
         self.run_command(command_slot);
 
-        crate::println!("HERE");
-
-        // TODO: check for errors
+        // TODO: add error checking and handling
+        Ok(())
     }
 
     fn status(&self) -> SataStatus {
@@ -532,6 +533,16 @@ impl Port {
         const OFFSET_TFD: usize = 0x20;
         let ptr = unsafe { self.base_ptr.byte_add(OFFSET_TFD) } as *const u32;
         TaskFileData(unsafe { ptr.read_volatile() })
+    }
+}
+
+impl StorageDevice for Port {
+    fn read(&mut self, buffer: &mut [u8], lba: u64, sectors: u16) -> Result<(), &'static str> {
+        self.read(buffer, lba, sectors)
+    }
+
+    fn write(&mut self, _buffer: &[u8], _lba: u64) -> Result<(), &'static str> {
+        todo!()
     }
 }
 
