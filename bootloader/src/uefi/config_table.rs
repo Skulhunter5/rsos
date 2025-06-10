@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use rsos::acpi::Rsdp;
+use bootloader::acpi::Rsdp;
 
 use super::{Guid, raw::tables::ConfigurationTableEntry};
 

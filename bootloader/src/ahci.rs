@@ -12,7 +12,7 @@ use alloc::{
     string::String,
     vec::Vec,
 };
-use rsos::pci::{DeviceType, MassStorageControllerType, PciDevice, SataControllerInterface};
+use bootloader::pci::{DeviceType, MassStorageControllerType, PciDevice, SataControllerInterface};
 
 use crate::disk::StorageDevice;
 

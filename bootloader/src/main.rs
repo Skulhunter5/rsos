@@ -10,7 +10,7 @@ use core::{alloc::GlobalAlloc, panic::PanicInfo};
 use ahci::AhciController;
 use alloc::alloc::Global;
 use disk::Disk;
-use rsos::{
+use bootloader::{
     acpi::AcpiTables,
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
 };

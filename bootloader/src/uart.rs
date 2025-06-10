@@ -1,6 +1,6 @@
 use core::fmt::Write;
 
-use rsos::{
+use bootloader::{
     io::{inb, outb},
     spin,
 };

@@ -1,11 +1,11 @@
 all: build vdisk run
 
 build:
-	cargo build
+	cd ./bootloader && cargo build
 
-vdisk: ./target/x86_64-unknown-uefi/debug/rsos.efi
+vdisk: ./target/x86_64-unknown-uefi/debug/bootloader.efi
 	mkdir -p ./vmtest/EFI/Boot
-	cp ./target/x86_64-unknown-uefi/debug/rsos.efi ./vmtest/EFI/Boot/Bootx64.efi
+	cp ./target/x86_64-unknown-uefi/debug/bootloader.efi ./vmtest/EFI/Boot/Bootx64.efi
 
 run: vdisk
 	qemu-system-x86_64 \
@@ -16,4 +16,6 @@ run: vdisk
 		-serial stdio
 
 clean:
+	rm -rf target
+	rm -rf Cargo.lock
 	rm -rf vmtest
