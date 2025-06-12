@@ -2,7 +2,8 @@ use core::{
     alloc::Layout,
     fmt::Debug,
     marker::PhantomData,
-    mem::{self, MaybeUninit}, ptr,
+    mem::{self, MaybeUninit},
+    ptr,
 };
 
 use alloc::{
@@ -461,13 +462,20 @@ impl Port {
         let bit_mask = 1 << slot;
 
         let ptr = unsafe { self.base_ptr.byte_add(0x38) } as *mut u32;
-        unsafe { ptr.write_volatile(bit_mask); }
+        unsafe {
+            ptr.write_volatile(bit_mask);
+        }
         while unsafe { ptr.read_volatile() } & bit_mask != 0 {
             core::hint::spin_loop();
         }
     }
 
-    pub fn read(&mut self, buffer: &mut [u8], lba: u64, sector_count: u16) -> Result<(), &'static str> {
+    pub fn read(
+        &mut self,
+        buffer: &mut [u8],
+        lba: u64,
+        sector_count: u16,
+    ) -> Result<(), &'static str> {
         let command_slot = 0u8;
 
         // Build read FIS
@@ -491,7 +499,11 @@ impl Port {
         // TODO: check that the -1 is correct and figure out why
         assert!(buffer.len() > 0, "Buffer must not be empty");
         let sector_size = 512;
-        assert_eq!(buffer.len() % sector_size, 0, "Buffer must be sector-aligned");
+        assert_eq!(
+            buffer.len() % sector_size,
+            0,
+            "Buffer must be sector-aligned"
+        );
         let buffer_size = buffer.len() as u32 - 1;
         let prdts = [Prdt::new(buffer_address, buffer_size)];
 
@@ -508,7 +520,10 @@ impl Port {
         if self.s64a {
             command_header.ctbau = ctbau;
         } else if ctbau != 0 {
-            panic!("tried to write {} (> 4 GiB) to CommandHeader.ctba(u) with CAP.S64A == false", command_table_address);
+            panic!(
+                "tried to write {} (> 4 GiB) to CommandHeader.ctba(u) with CAP.S64A == false",
+                command_table_address
+            );
         }
 
         self.run_command(command_slot);
@@ -839,7 +854,7 @@ impl CommandTable {
             command_table.prdts[i] = *prdt;
         }
 
-        command_table 
+        command_table
     }
 
     // TODO: check if this is correct
@@ -894,14 +909,17 @@ struct Prdt {
 impl Prdt {
     fn new(address: u64, count: u32) -> Self {
         if address & 0x1 != 0 {
-            panic!("tried to create Prdt with address {}; must be word-aligned", address);
+            panic!(
+                "tried to create Prdt with address {}; must be word-aligned",
+                address
+            );
         }
         let dba = address as u32;
         let dbau = (address >> 32) as u32;
 
         const COUNT_MASK: u32 = 0b11_1111_1111_1111_1111_1111; // 22 bits
         if count & !COUNT_MASK != 0 {
-            panic!("tried to create Prdt with size {} (> 4 MiB)", count) ;
+            panic!("tried to create Prdt with size {} (> 4 MiB)", count);
         }
         let dw3 = count;
 

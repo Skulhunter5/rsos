@@ -9,20 +9,21 @@ use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
 use ahci::AhciController;
 use alloc::alloc::Global;
-use disk::Disk;
 use bootloader::{
     acpi::AcpiTables,
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
 };
+use disk::Disk;
 use uefi::{
     SystemTable,
     raw::{self, ImageHandle},
 };
 
 mod ahci;
+mod disk;
+mod fat;
 mod uart;
 pub mod uefi;
-mod disk;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -180,7 +181,7 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
         }
     }
     let storage_device =
-        storage_device.expect("failed to find ahci controller pci device during enumeration");
+        storage_device.expect("failed to find ahci controller during pci enumeration");
 
     let mut ahci_controller =
         AhciController::try_from(storage_device).expect("failed to create AhciController");
@@ -192,13 +193,16 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
 
     let port = ahci_controller.get_port(0).unwrap();
     let disk = Disk::new(port).unwrap();
-    let partition = &disk.partitions()[0];
+    let partition = disk.partitions()[0];
+    println!("{:?}", &partition);
 
     let mut buffer = [0u8; 4 * 1024];
     let sector_count = 1;
     println!("Beginning read...");
-    port.read(&mut buffer, 0, sector_count).unwrap();
-    println!("{:x?}", &buffer[440..512]);
+    port.read(&mut buffer, partition.start as u64, sector_count)
+        .unwrap();
+    // port.read(&mut buffer, 0, sector_count).unwrap();
+    println!("{:x?}", &buffer);
 
     loop {}
 }

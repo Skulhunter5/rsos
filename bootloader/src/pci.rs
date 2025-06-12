@@ -144,8 +144,7 @@ impl Pci {
     }
 
     unsafe fn get_device_id(addr: PciAddress) -> DeviceId {
-        (unsafe { Self::config_read_u32(addr, 0) }
-            >> (8 * mem::size_of::<u16>())) as u16
+        (unsafe { Self::config_read_u32(addr, 0) } >> (8 * mem::size_of::<u16>())) as u16
     }
 
     unsafe fn get_device_type(addr: PciAddress) -> Result<DeviceType, (u8, u8, u8)> {

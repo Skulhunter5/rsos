@@ -9,7 +9,10 @@ pub struct Disk<'a> {
 impl<'a> Disk<'a> {
     pub fn new(storage_device: &'a mut dyn StorageDevice) -> Result<Self, &'static str> {
         let partitions = Vec::new();
-        let mut disk = Self { storage_device, partitions };
+        let mut disk = Self {
+            storage_device,
+            partitions,
+        };
 
         disk.read_partitions()?;
 
@@ -44,7 +47,7 @@ impl<'a> Disk<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Partition {
     pub ty: u8,
     pub start: u32,
@@ -61,7 +64,11 @@ impl Partition {
         let start = entry.lba_start;
         let sector_count = entry.sector_count;
 
-        Some(Self { ty, start, sector_count })
+        Some(Self {
+            ty,
+            start,
+            sector_count,
+        })
     }
 }
 
