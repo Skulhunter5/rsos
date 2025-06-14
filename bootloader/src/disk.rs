@@ -1,27 +1,12 @@
 use alloc::vec::Vec;
 
-#[derive(Debug)]
-pub struct Disk<'a> {
-    storage_device: &'a mut dyn StorageDevice,
-    partitions: Vec<Partition>,
-}
+pub struct Disk;
 
-impl<'a> Disk<'a> {
-    pub fn new(storage_device: &'a mut dyn StorageDevice) -> Result<Self, &'static str> {
-        let partitions = Vec::new();
-        let mut disk = Self {
-            storage_device,
-            partitions,
-        };
-
-        disk.read_partitions()?;
-
-        Ok(disk)
-    }
-
-    fn read_partitions(&mut self) -> Result<(), &'static str> {
+impl Disk {
+    // TODO: add support for GPT
+    pub fn read_partitions(storage_device: &mut dyn StorageDevice) -> Result<Vec<Partition>, &'static str> {
         let mut buffer = [0u8; 4 * 1024];
-        self.storage_device.read(&mut buffer, 0, 1)?;
+        storage_device.read(&mut buffer, 0, 1)?;
         if buffer[510..512] != [0x55, 0xAA] {
             return Err("invalid partition table");
         }
@@ -37,21 +22,15 @@ impl<'a> Disk<'a> {
             }
         }
 
-        self.partitions = partitions;
-
-        Ok(())
-    }
-
-    pub fn partitions(&self) -> &Vec<Partition> {
-        &self.partitions
+        Ok(partitions)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Partition {
     pub ty: u8,
-    pub start: u32,
-    pub sector_count: u32,
+    pub start: u64,
+    pub sector_count: u64,
 }
 
 impl Partition {
@@ -61,8 +40,8 @@ impl Partition {
             return None;
         }
         let ty = entry.ty;
-        let start = entry.lba_start;
-        let sector_count = entry.sector_count;
+        let start = entry.lba_start as u64;
+        let sector_count = entry.sector_count as u64;
 
         Some(Self {
             ty,
@@ -90,4 +69,29 @@ struct MbrPartitionTableEntry {
 pub trait StorageDevice: core::fmt::Debug {
     fn read(&mut self, buffer: &mut [u8], lba: u64, sectors: u16) -> Result<(), &'static str>;
     fn write(&mut self, buffer: &[u8], lba: u64) -> Result<(), &'static str>;
+}
+
+#[derive(Debug)]
+pub struct PartitionDevice<'a> {
+    storage_device: &'a mut dyn StorageDevice,
+    partition: Partition,
+}
+
+impl<'a> PartitionDevice<'a> {
+    pub fn new(storage_device: &'a mut dyn StorageDevice, partition: Partition) -> Self {
+        Self { storage_device, partition }
+    }
+}
+
+impl StorageDevice for PartitionDevice<'_> {
+    fn read(&mut self, buffer: &mut [u8], lba: u64, sectors: u16) -> Result<(), &'static str> {
+        if (lba + sectors as u64) > self.partition.sector_count {
+            return Err("error: sector out of range for partition");
+        }
+        self.storage_device.read(buffer, self.partition.start, sectors)
+    }
+
+    fn write(&mut self, _buffer: &[u8], _lba: u64) -> Result<(), &'static str> {
+        todo!();
+    }
 }

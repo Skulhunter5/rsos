@@ -13,7 +13,8 @@ use bootloader::{
     acpi::AcpiTables,
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
 };
-use disk::Disk;
+use disk::{Disk, PartitionDevice, StorageDevice};
+use fat::FatFs;
 use uefi::{
     SystemTable,
     raw::{self, ImageHandle},
@@ -192,17 +193,22 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     // println!("GHC.AE: {}", ghc.ae());
 
     let port = ahci_controller.get_port(0).unwrap();
-    let disk = Disk::new(port).unwrap();
-    let partition = disk.partitions()[0];
-    println!("{:?}", &partition);
+    let partitions = Disk::read_partitions(port).unwrap();
+    let partition = partitions[0];
+    println!("{:?}", &partitions);
 
-    let mut buffer = [0u8; 4 * 1024];
-    let sector_count = 1;
-    println!("Beginning read...");
-    port.read(&mut buffer, partition.start as u64, sector_count)
-        .unwrap();
-    // port.read(&mut buffer, 0, sector_count).unwrap();
-    println!("{:x?}", &buffer);
+    let mut partition = PartitionDevice::new(port, partition);
+
+    let mut fs = FatFs::wrap(&mut partition as &mut dyn StorageDevice).unwrap();
+    let files = fs.list_directory("/").unwrap();
+    println!("Files: {:?}", &files);
+
+    // let mut buffer = [0u8; 4 * 1024];
+    // let sector_count = 1;
+    // println!("Beginning read...");
+    // port.read(&mut buffer, partition.start as u64, sector_count)
+    //     .unwrap();
+    // println!("{:x?}", &buffer);
 
     loop {}
 }
