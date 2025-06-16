@@ -4,7 +4,9 @@ pub struct Disk;
 
 impl Disk {
     // TODO: add support for GPT
-    pub fn read_partitions(storage_device: &mut dyn StorageDevice) -> Result<Vec<Partition>, &'static str> {
+    pub fn read_partitions(
+        storage_device: &mut dyn StorageDevice,
+    ) -> Result<Vec<Partition>, &'static str> {
         let mut buffer = [0u8; 4 * 1024];
         storage_device.read(&mut buffer, 0, 1)?;
         if buffer[510..512] != [0x55, 0xAA] {
@@ -79,7 +81,10 @@ pub struct PartitionDevice<'a> {
 
 impl<'a> PartitionDevice<'a> {
     pub fn new(storage_device: &'a mut dyn StorageDevice, partition: Partition) -> Self {
-        Self { storage_device, partition }
+        Self {
+            storage_device,
+            partition,
+        }
     }
 }
 
@@ -88,7 +93,8 @@ impl StorageDevice for PartitionDevice<'_> {
         if (lba + sectors as u64) > self.partition.sector_count {
             return Err("error: sector out of range for partition");
         }
-        self.storage_device.read(buffer, self.partition.start, sectors)
+        self.storage_device
+            .read(buffer, self.partition.start, sectors)
     }
 
     fn write(&mut self, _buffer: &[u8], _lba: u64) -> Result<(), &'static str> {

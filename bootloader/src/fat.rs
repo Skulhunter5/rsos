@@ -7,35 +7,82 @@ use crate::disk::StorageDevice;
 #[derive(Debug)]
 pub struct FatFs<'a> {
     storage_device: &'a mut dyn StorageDevice,
-    bps: usize,
-    spc: usize,
+    bpb: BiosParameterBlock,
+    bytes_per_sector: usize,
+    sectors_per_cluster: usize,
+    sectors_per_fat: usize,
+    total_sectors: usize,
+    first_fat_sector: usize,
+    root_cluster: usize,
+    first_data_sector: usize,
 }
 
 impl<'a> FatFs<'a> {
     pub fn wrap(storage_device: &'a mut dyn StorageDevice) -> Result<Self, &'static str> {
-        let mut fs = Self::init(storage_device)?;
-        let _header = fs.read_from_disk::<Fat32Header>()?;
-        let _bpb = fs.read_from_disk::<BiosParameterBlock>()?;
+        let fs = Self::init(storage_device)?;
 
         Ok(fs)
     }
 
     fn init(storage_device: &'a mut dyn StorageDevice) -> Result<Self, &'static str> {
         let bpb = Self::read_bpb(storage_device)?;
-        let bps = unsafe { (&raw const bpb.bytes_per_sector).read_unaligned() } as usize;
-        let spc = unsafe { (&raw const bpb.sectors_per_cluster).read_unaligned() } as usize;
-        crate::println!("bytes_per_sector: {}", bps);
-        crate::println!("sectors_per_cluster: {}", spc);
         crate::println!("bpb: {:?}", &bpb);
 
-        Ok(Self { storage_device, bps, spc })
+        let bytes_per_sector = bpb.bytes_per_sector as usize;
+        let sectors_per_cluster = bpb.sectors_per_cluster as usize;
+
+        let total_sectors = if bpb.sector_count != 0 {
+            bpb.sector_count as usize
+        } else {
+            bpb.large_sector_count as usize
+        };
+        let first_fat_sector = bpb.reserved_sectors as usize;
+
+        if total_sectors < 65525 {
+            return Err("unsupported FAT type");
+        }
+
+        let header = Self::read_header(storage_device)?;
+        crate::println!("header: {:?}", &header);
+        let root_cluster = header.root_cluster as usize;
+
+        let reserved_sectors = bpb.reserved_sectors as usize;
+        let fat_count = bpb.fat_count as usize;
+        let sectors_per_fat = bpb.sectors_per_fat as usize;
+        let root_directory_entry_count = bpb.root_directory_entry_count as usize;
+
+        let root_dir_sectors =
+            ((root_directory_entry_count * 32) + (bytes_per_sector - 1)) / bytes_per_sector;
+        let first_data_sector = reserved_sectors + (fat_count * sectors_per_fat) + root_dir_sectors;
+
+        crate::println!("root_cluster: {}", root_cluster);
+        crate::println!("root_dir_sectors: {}", root_dir_sectors);
+        crate::println!("first_data_sector: {}", first_data_sector);
+        crate::println!(
+            "test: {}",
+            core::mem::offset_of!(Fat32Header, sectors_per_fat)
+        );
+
+        Ok(Self {
+            storage_device,
+            bpb,
+            bytes_per_sector,
+            sectors_per_cluster,
+            sectors_per_fat,
+            total_sectors,
+            first_fat_sector,
+            root_cluster,
+            first_data_sector,
+        })
     }
 
-    fn read_bpb(storage_device: &mut dyn StorageDevice) -> Result<BiosParameterBlock, &'static str> {
+    fn read_bpb(
+        storage_device: &mut dyn StorageDevice,
+    ) -> Result<BiosParameterBlock, &'static str> {
         let mut buffer = [0u8; 4 * 1024];
         storage_device.read(&mut buffer, 0, 1)?;
         let mut bpb = MaybeUninit::<BiosParameterBlock>::uninit();
-        
+
         unsafe {
             ptr::copy_nonoverlapping(
                 buffer.as_ptr(),
@@ -47,26 +94,69 @@ impl<'a> FatFs<'a> {
         }
     }
 
+    fn read_header(storage_device: &mut dyn StorageDevice) -> Result<Fat32Header, &'static str> {
+        let mut buffer = [0u8; 4 * 1024];
+        storage_device.read(&mut buffer, 0, 1)?;
+        let mut header = MaybeUninit::<Fat32Header>::uninit();
+
+        unsafe {
+            ptr::copy_nonoverlapping(
+                buffer.as_ptr(),
+                header.as_mut_ptr() as *mut u8,
+                size_of::<Fat32Header>(),
+            );
+
+            return Ok(header.assume_init());
+        }
+    }
+
     fn read_from_disk<T: Copy + Sized>(&mut self) -> Result<T, &'static str> {
-        assert!(size_of::<T>() <= self.bps);
+        assert!(size_of::<T>() <= self.bytes_per_sector);
 
         // let mut buffer = Vec::with_capacity(self.bps);
         let mut buffer = [0u8; 4 * 1024];
         self.storage_device.read(&mut buffer, 0, 1)?;
-        let mut bpb = MaybeUninit::<T>::uninit();
-        
+        let mut item = MaybeUninit::<T>::uninit();
+
         unsafe {
             ptr::copy_nonoverlapping(
                 buffer.as_ptr(),
-                bpb.as_mut_ptr() as *mut u8,
+                item.as_mut_ptr() as *mut u8,
                 size_of::<T>(),
             );
 
-            return Ok(bpb.assume_init());
+            return Ok(item.assume_init());
         }
     }
 
-    pub fn list_directory<S: AsRef<str>>(&mut self, _path: S) -> Result<Vec<DirectoryEntry>, &'static str> {
+    fn read_sector(&mut self, sector: usize) -> Result<Vec<u8>, &'static str> {
+        let mut buffer = alloc::vec![0u8; self.bytes_per_sector];
+        self.storage_device.read(&mut buffer, sector as u64, 1)?;
+
+        Ok(buffer)
+    }
+
+    fn read_cluster(&mut self, cluster: usize) -> Result<Vec<u8>, &'static str> {
+        let mut buffer = alloc::vec![0u8; self.bytes_per_sector * self.sectors_per_cluster];
+        let sector = self.first_sector_of_cluster(cluster);
+        crate::println!("cluster-sector: {}", sector);
+        self.storage_device
+            .read(&mut buffer, sector as u64, self.sectors_per_cluster as u16)?;
+
+        Ok(buffer)
+    }
+
+    fn first_sector_of_cluster(&self, cluster: usize) -> usize {
+        ((cluster - 2) * self.sectors_per_cluster) + self.first_data_sector
+    }
+
+    pub fn list_directory<S: AsRef<str>>(
+        &mut self,
+        _path: S,
+    ) -> Result<Vec<DirectoryEntry>, &'static str> {
+        let buffer = self.read_cluster(self.root_cluster)?;
+        crate::println!("root_cluster: {:?}", &buffer);
+
         todo!();
     }
 }
@@ -93,7 +183,7 @@ struct BiosParameterBlock {
     large_sector_count: u32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
 struct Fat32Header {
     bpb: BiosParameterBlock,
@@ -123,10 +213,4 @@ struct FsInfo {
     next_available_cluster_look: u32,
     reserved2: [u8; 12],
     trail_signature: u32,
-}
-
-impl Debug for Fat32Header {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        todo!()
-    }
 }
