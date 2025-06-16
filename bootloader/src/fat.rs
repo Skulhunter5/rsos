@@ -30,6 +30,17 @@ impl<'a> FatFs<'a> {
 
         let bytes_per_sector = bpb.bytes_per_sector as usize;
         let sectors_per_cluster = bpb.sectors_per_cluster as usize;
+        let reserved_sectors = bpb.reserved_sectors as usize;
+        let fat_count = bpb.fat_count as usize;
+        let sectors_per_fat = bpb.sectors_per_fat as usize;
+        let root_directory_entry_count = bpb.root_directory_entry_count as usize;
+
+        let root_dir_sectors =
+            ((root_directory_entry_count * 32) + (bytes_per_sector - 1)) / bytes_per_sector;
+
+        if bytes_per_sector == 0 {
+            return Err("unsupported FAT type");
+        }
 
         let total_sectors = if bpb.sector_count != 0 {
             bpb.sector_count as usize
@@ -38,7 +49,10 @@ impl<'a> FatFs<'a> {
         };
         let first_fat_sector = bpb.reserved_sectors as usize;
 
-        if total_sectors < 65525 {
+        let data_sectors =
+            total_sectors - (reserved_sectors + (fat_count * sectors_per_fat) + root_dir_sectors);
+        let total_clusters = data_sectors / sectors_per_cluster;
+        if total_clusters < 65525 {
             return Err("unsupported FAT type");
         }
 
@@ -46,22 +60,12 @@ impl<'a> FatFs<'a> {
         crate::println!("header: {:?}", &header);
         let root_cluster = header.root_cluster as usize;
 
-        let reserved_sectors = bpb.reserved_sectors as usize;
-        let fat_count = bpb.fat_count as usize;
-        let sectors_per_fat = bpb.sectors_per_fat as usize;
-        let root_directory_entry_count = bpb.root_directory_entry_count as usize;
-
-        let root_dir_sectors =
-            ((root_directory_entry_count * 32) + (bytes_per_sector - 1)) / bytes_per_sector;
         let first_data_sector = reserved_sectors + (fat_count * sectors_per_fat) + root_dir_sectors;
 
         crate::println!("root_cluster: {}", root_cluster);
         crate::println!("root_dir_sectors: {}", root_dir_sectors);
         crate::println!("first_data_sector: {}", first_data_sector);
-        crate::println!(
-            "test: {}",
-            core::mem::offset_of!(Fat32Header, sectors_per_fat)
-        );
+        crate::println!("test: {}", core::mem::offset_of!(Fat32Header, root_cluster));
 
         Ok(Self {
             storage_device,
