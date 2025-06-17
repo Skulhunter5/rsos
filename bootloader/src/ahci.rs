@@ -532,6 +532,74 @@ impl Port {
         Ok(())
     }
 
+    pub fn identify(&mut self) -> Result<DeviceProperties, &'static str> {
+        let command_slot = 0u8;
+
+        let buffer = alloc::vec![0u8; 512];
+
+        // Build read FIS
+        let mut fis = [0; 64];
+        {
+            fis[0] = FisType::RegisterH2D as u8;
+            fis[1] = 0x80;
+            fis[2] = 0xEC;
+            fis[7] = 0x40;
+        }
+        let acmd = [0; 16];
+        let buffer_address = buffer.as_ptr() as u64;
+        // TODO: check that the -1 is correct and figure out why
+        assert!(buffer.len() > 0, "Buffer must not be empty");
+        let sector_size = 512;
+        assert_eq!(
+            buffer.len() % sector_size,
+            0,
+            "Buffer must be sector-aligned"
+        );
+        let buffer_size = buffer.len() as u32 - 1;
+        let prdts = [Prdt::new(buffer_address, buffer_size)];
+
+        // let fis = RegisterFisH2D::new();
+        self.command_table = CommandTable::new(fis, acmd, &prdts);
+
+        let command_header = &mut self.command_list.data[command_slot as usize];
+        command_header.flags = 5;
+        command_header.prdtl = prdts.len() as u16;
+        let command_table_address = self.command_table.get_address();
+        let ctba = command_table_address as u32;
+        command_header.ctba = ctba;
+        let ctbau = (command_table_address >> 32) as u32;
+        if self.s64a {
+            command_header.ctbau = ctbau;
+        } else if ctbau != 0 {
+            panic!(
+                "tried to write {} (> 4 GiB) to CommandHeader.ctba(u) with CAP.S64A == false",
+                command_table_address
+            );
+        }
+
+        self.run_command(command_slot);
+        // TODO: add error checking and handling
+
+        let data = unsafe {
+            assert!(buffer.len() >= size_of::<IdentifyDeviceData>());
+
+            let data = MaybeUninit::<IdentifyDeviceData>::uninit();
+            buffer.as_ptr().copy_to_nonoverlapping(data.as_ptr() as *mut u8, size_of::<IdentifyDeviceData>());
+            data.assume_init()
+        };
+        
+        let sector_count = if data.commands_and_feature_sets_supported1 | (1 << 10) != 0 {
+            data.user_addressable_logical_sectors_48 as u64
+        } else {
+            data.user_addressable_logical_sectors_28 as u64
+        };
+
+        let device_properties = DeviceProperties {
+            sector_count,
+        };
+        Ok(device_properties)
+    }
+
     fn status(&self) -> SataStatus {
         const OFFSET_SSTS: usize = 0x28;
         let ptr = unsafe { self.base_ptr.byte_add(OFFSET_SSTS) } as *const u32;
@@ -559,6 +627,119 @@ impl StorageDevice for Port {
     fn write(&mut self, _buffer: &[u8], _lba: u64) -> Result<(), &'static str> {
         todo!()
     }
+
+    fn sector_count(&mut self) -> Result<u64, &'static str> {
+        let device_properties = self.identify()?;
+        Ok(device_properties.sector_count)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DeviceProperties {
+    sector_count: u64,
+}
+
+// struct based on https://people.freebsd.org/~imp/asiabsdcon2015/works/d2161r5-ATAATAPI_Command_Set_-_3.pdf
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+struct IdentifyDeviceData {
+    pub general_configuration: u16,
+    obsolete0: u16,
+    pub specific_configuration: u16,
+    obsolete1: u16,
+    retired0: [u16; 2],
+    obsolete2: u16,
+    reserved_for_cfa0: [u16; 2],
+    retired1: u16,
+    pub serial_number: [u8; 20], // 10..19
+    retired2: [u16; 2],
+    obsolete3: u16,
+    pub firmware_revision: [u16; 4], // 23..26
+    pub model_number: [u16; 20], // 27..46
+    pub other0: u16, // 47
+    pub trusted_computing_feature_set_options: u16,
+    pub capabilities0: u16,
+    pub capabilities1: u16,
+    obsolete4: [u16; 2],
+    pub other1: u16, // 53
+    obsolete5: [u16; 5], // 54..58
+    pub other2: u16, // 59
+    pub user_addressable_logical_sectors_28: u32, // 60..61
+    obsolete6: u16,
+    pub other3: u16, // 63
+    pub other4: u16, // 64
+    pub minimum_multiword_dma_transfer_cycle_time_per_word: u16,
+    pub recommended_multiword_dma_transfer_cycle_time: u16,
+    pub minimum_pio_transfer_cycle_time_without_flow_control: u16,
+    pub minimum_pio_transfer_cycle_time_with_iordy: u16,
+    pub additional_supported: u16,
+    reserved0: u16,
+    reserved_for_identify_packet_device_command: [u16; 4], // 71..74
+    pub queue_depth: u16,
+    pub sata_capabilities: u16,
+    pub sata_additional_capabilities: u16,
+    pub sata_features_supported: u16,
+    pub sata_features_enabled: u16,
+    pub major_version_number: u16,
+    pub minor_version_number: u16,
+    pub commands_and_feature_sets_supported0: u16,
+    pub commands_and_feature_sets_supported1: u16,
+    pub commands_and_feature_sets_supported2: u16,
+    pub commands_and_feature_sets_supported_or_enabled0: u16,
+    pub commands_and_feature_sets_supported_or_enabled1: u16,
+    pub commands_and_feature_sets_supported_or_enabled2: u16,
+    pub ultra_dma_modes: u16,
+    pub other5: u16, // 89
+    pub other6: u16, // 90
+    reserved1: u8,
+    pub current_apm_level_value: u8,
+    pub master_password_identifier: u16,
+    pub hardware_reset_results: u16,
+    obsolete7: u16,
+    pub stream_minimum_request_size: u16,
+    pub streaming_transfer_time_dma: u16,
+    pub streaming_access_latency: u16,
+    pub streaming_performance_granularity: u32,
+    pub user_addressable_logical_sectors_48: u64,
+    pub streaming_transfer_time_pio: u16,
+    pub max_number_of_512_byte_blocks_per_data_set_management_command: u16,
+    pub other7: u16, // 106
+    pub inter_seek_delay_for_iso_iec_7779_standard_acoustic_testing: u16,
+    pub world_wide_name: [u16; 4],
+    reserved2: [u16; 4],
+    obsolete8: u16,
+    pub logical_sector_size: u32,
+    pub commands_and_feature_sets_supported3: u16,
+    pub commands_and_feature_sets_supported_or_enabled3: u16,
+    reserved_for_expanded_supported_and_enabled_settings: [u16; 6], // 121..126
+    obsolete9: u16,
+    pub security_status: u16,
+    pub vendor_specific: [u16; 31], // 129..159
+    reserved_for_cfa1: [u16; 8], // 160..167
+    pub other8: u16, // 168
+    pub data_set_management_command_support: u16,
+    pub additional_product_identifier: [u16; 4],
+    reserved3: [u16; 2],
+    pub current_media_serial_number: [u16; 29], // 176..205
+    pub sct_command_transport: u16,
+    reserved4: [u16; 2],
+    pub alignment_of_logical_sectors_within_a_physical_sector: u16,
+    pub write_read_verify_sector_mode_3_count: u32,
+    pub write_read_verify_sector_mode_2_count: u32,
+    obsolete10: [u16; 3],
+    pub nominal_media_rotation: u16,
+    reserved5: u16,
+    obsolete11: u16,
+    pub other9: u16, // 220
+    reserved6: u16,
+    pub transport_major_version_number: u16,
+    pub transport_minor_version_number: u16,
+    reserved7: [u16; 6],
+    pub extended_number_of_user_addressable_sectors: u64,
+    pub minimum_number_of_512_byte_data_blocks_per_download_microcode_operation: u16,
+    pub maximum_number_of_512_byte_data_blocks_per_download_microcode_operation: u16,
+    reserved8: [u16; 19], // 236..254
+    pub integrity_word: u16,
 }
 
 #[derive(Debug, Clone, Copy)]

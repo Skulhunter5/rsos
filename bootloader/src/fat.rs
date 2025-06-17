@@ -57,7 +57,7 @@ impl<'a> FatFs<'a> {
         }
 
         let header = Self::read_header(storage_device)?;
-        crate::println!("header: {:?}", &header);
+        // crate::println!("header: {:?}", &header);
         let root_cluster = header.root_cluster as usize;
 
         let first_data_sector = reserved_sectors + (fat_count * sectors_per_fat) + root_dir_sectors;

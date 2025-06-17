@@ -8,7 +8,7 @@ extern crate alloc;
 use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
 use ahci::AhciController;
-use alloc::alloc::Global;
+use alloc::{alloc::Global, string::ToString};
 use bootloader::{
     acpi::AcpiTables,
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
@@ -29,10 +29,18 @@ pub mod uefi;
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
-        uart::puts("!!! PANIC !!!");
+        uart::puts("!!! PANIC !!!\n");
         match info.message().as_str() {
-            Some(message) => uart::puts(message),
-            None => uart::puts("PanicMessage.as_str() failed"),
+            Some(message) => {
+                uart::puts(message);
+                uart::puts("\n");
+            }
+            None => {
+                uart::puts("PanicMessage.as_str() failed\n");
+                let message = info.message().to_string();
+                uart::puts(&message);
+                uart::puts("\n");
+            }
         }
     }
 
@@ -194,8 +202,10 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
 
     let port = ahci_controller.get_port(0).unwrap();
     let partitions = Disk::read_partitions(port).unwrap();
+    if partitions.len() == 0 {
+        panic!("No partitions found");
+    }
     let partition = partitions[0];
-    println!("{:?}", &partitions);
 
     let mut partition = PartitionDevice::new(port, partition);
 
