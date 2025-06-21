@@ -48,6 +48,9 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
+#[cfg(all(not(target_pointer_width="64"),not(target_pointer_width="32")))]
+compile_error!("unsupported target pointer width");
+
 //struct UefiWriter {
 //    con_out: *mut uefi::SimpleTextOutputProtocol,
 //}
