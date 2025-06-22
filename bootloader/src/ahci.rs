@@ -480,6 +480,7 @@ impl Port {
 
         // Build read FIS
         let mut fis = [0; 64];
+        crate::println!("read lba: {}", lba);
         {
             fis[0] = FisType::RegisterH2D as u8;
             fis[1] = 0x80;
@@ -498,12 +499,20 @@ impl Port {
         let buffer_address = buffer.as_ptr() as u64;
         // TODO: check that the -1 is correct and figure out why
         assert!(buffer.len() > 0, "Buffer must not be empty");
+        // TODO: use the actual sector_size
         let sector_size = 512;
         assert_eq!(
             buffer.len() % sector_size,
             0,
             "Buffer must be sector-aligned"
         );
+        // TODO: Ensure prdts are set up correctly. For example, create multiple prdts if the
+        // buffer is too large for a single prdt.
+        // const MAX_PRDT_SIZE: usize = 2usize.pow(22);
+        const MAX_PRDT_SIZE: usize = 0b11_1111_1111_1111_1111_1111; // 22 bits
+        if buffer.len() >= MAX_PRDT_SIZE {
+            todo!("read buffer > 4 MiB");
+        }
         let buffer_size = buffer.len() as u32 - 1;
         let prdts = [Prdt::new(buffer_address, buffer_size)];
 
@@ -548,13 +557,6 @@ impl Port {
         let acmd = [0; 16];
         let buffer_address = buffer.as_ptr() as u64;
         // TODO: check that the -1 is correct and figure out why
-        assert!(buffer.len() > 0, "Buffer must not be empty");
-        let sector_size = 512;
-        assert_eq!(
-            buffer.len() % sector_size,
-            0,
-            "Buffer must be sector-aligned"
-        );
         let buffer_size = buffer.len() as u32 - 1;
         let prdts = [Prdt::new(buffer_address, buffer_size)];
 
@@ -584,18 +586,30 @@ impl Port {
             assert!(buffer.len() >= size_of::<IdentifyDeviceData>());
 
             let data = MaybeUninit::<IdentifyDeviceData>::uninit();
-            buffer.as_ptr().copy_to_nonoverlapping(data.as_ptr() as *mut u8, size_of::<IdentifyDeviceData>());
+            buffer
+                .as_ptr()
+                .copy_to_nonoverlapping(data.as_ptr() as *mut u8, size_of::<IdentifyDeviceData>());
             data.assume_init()
         };
-        
+
         let sector_count = if data.commands_and_feature_sets_supported1 | (1 << 10) != 0 {
             data.user_addressable_logical_sectors_48 as u64
         } else {
             data.user_addressable_logical_sectors_28 as u64
         };
+        let sector_size = if data.other7 & (0b11 << 14) == (1 << 14) {
+            if data.other7 & (1 << 12) != 0 {
+                data.logical_sector_size as usize
+            } else {
+                512
+            }
+        } else {
+            return Err("invalid data in word 106 of response to ATA IDENTIFY DEVICE command");
+        };
 
         let device_properties = DeviceProperties {
             sector_count,
+            sector_size,
         };
         Ok(device_properties)
     }
@@ -632,11 +646,17 @@ impl StorageDevice for Port {
         let device_properties = self.identify()?;
         Ok(device_properties.sector_count)
     }
+
+    fn sector_size(&mut self) -> Result<usize, &'static str> {
+        let device_properties = self.identify()?;
+        Ok(device_properties.sector_size)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct DeviceProperties {
     sector_count: u64,
+    sector_size: usize,
 }
 
 // struct based on https://people.freebsd.org/~imp/asiabsdcon2015/works/d2161r5-ATAATAPI_Command_Set_-_3.pdf
@@ -655,15 +675,15 @@ struct IdentifyDeviceData {
     retired2: [u16; 2],
     obsolete3: u16,
     pub firmware_revision: [u16; 4], // 23..26
-    pub model_number: [u16; 20], // 27..46
-    pub other0: u16, // 47
+    pub model_number: [u16; 20],     // 27..46
+    pub other0: u16,                 // 47
     pub trusted_computing_feature_set_options: u16,
     pub capabilities0: u16,
     pub capabilities1: u16,
     obsolete4: [u16; 2],
-    pub other1: u16, // 53
-    obsolete5: [u16; 5], // 54..58
-    pub other2: u16, // 59
+    pub other1: u16,                              // 53
+    obsolete5: [u16; 5],                          // 54..58
+    pub other2: u16,                              // 59
     pub user_addressable_logical_sectors_28: u32, // 60..61
     obsolete6: u16,
     pub other3: u16, // 63
@@ -715,19 +735,19 @@ struct IdentifyDeviceData {
     obsolete9: u16,
     pub security_status: u16,
     pub vendor_specific: [u16; 31], // 129..159
-    reserved_for_cfa1: [u16; 8], // 160..167
-    pub other8: u16, // 168
+    reserved_for_cfa1: [u16; 8],    // 160..167
+    pub other8: u16,                // 168
     pub data_set_management_command_support: u16,
     pub additional_product_identifier: [u16; 4],
     reserved3: [u16; 2],
-    pub current_media_serial_number: [u16; 29], // 176..205
+    pub current_media_serial_number: [u16; 30], // 176..205
     pub sct_command_transport: u16,
     reserved4: [u16; 2],
     pub alignment_of_logical_sectors_within_a_physical_sector: u16,
     pub write_read_verify_sector_mode_3_count: u32,
     pub write_read_verify_sector_mode_2_count: u32,
     obsolete10: [u16; 3],
-    pub nominal_media_rotation: u16,
+    pub nominal_media_rotation_rate: u16,
     reserved5: u16,
     obsolete11: u16,
     pub other9: u16, // 220

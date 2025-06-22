@@ -16,7 +16,11 @@ impl Disk {
         let mut partitions = Vec::new();
 
         if Self::is_super_floppy(&buffer) {
-            partitions.push(Partition { ty: 0, start: 0, sector_count: storage_device.sector_count()? });
+            partitions.push(Partition {
+                ty: 0,
+                start: 0,
+                sector_count: storage_device.sector_count()?,
+            });
             return Ok(partitions);
         }
 
@@ -34,13 +38,13 @@ impl Disk {
     }
 
     fn is_super_floppy(buffer: &[u8]) -> bool {
-        if &buffer[0x52..(0x52+8)] == "FAT32   ".as_bytes() {
+        if &buffer[0x52..(0x52 + 8)] == "FAT32   ".as_bytes() {
             return true;
         }
-        if &buffer[0x36..(0x36+8)] == "FAT12   ".as_bytes() {
+        if &buffer[0x36..(0x36 + 8)] == "FAT12   ".as_bytes() {
             return true;
         }
-        if &buffer[0x36..(0x36+8)] == "FAT16   ".as_bytes() {
+        if &buffer[0x36..(0x36 + 8)] == "FAT16   ".as_bytes() {
             return true;
         }
         return false;
@@ -91,6 +95,7 @@ pub trait StorageDevice: core::fmt::Debug {
     fn read(&mut self, buffer: &mut [u8], lba: u64, sectors: u16) -> Result<(), &'static str>;
     fn write(&mut self, buffer: &[u8], lba: u64) -> Result<(), &'static str>;
     fn sector_count(&mut self) -> Result<u64, &'static str>;
+    fn sector_size(&mut self) -> Result<usize, &'static str>;
 }
 
 #[derive(Debug)]
@@ -114,7 +119,7 @@ impl StorageDevice for PartitionDevice<'_> {
             return Err("error: sector out of range for partition");
         }
         self.storage_device
-            .read(buffer, self.partition.start, sectors)
+            .read(buffer, self.partition.start + lba, sectors)
     }
 
     fn write(&mut self, _buffer: &[u8], _lba: u64) -> Result<(), &'static str> {
@@ -123,5 +128,9 @@ impl StorageDevice for PartitionDevice<'_> {
 
     fn sector_count(&mut self) -> Result<u64, &'static str> {
         Ok(self.partition.sector_count)
+    }
+
+    fn sector_size(&mut self) -> Result<usize, &'static str> {
+        self.storage_device.sector_size()
     }
 }
