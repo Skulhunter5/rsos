@@ -480,7 +480,6 @@ impl Port {
 
         // Build read FIS
         let mut fis = [0; 64];
-        crate::println!("read lba: {}", lba);
         {
             fis[0] = FisType::RegisterH2D as u8;
             fis[1] = 0x80;

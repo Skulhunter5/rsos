@@ -16,7 +16,7 @@ vdisk: $(BOOTLOADER_BIN) $(KERNEL_BIN)
 	mmd -i $(DISK_IMG) ::/EFI
 	mmd -i $(DISK_IMG) ::/EFI/BOOT
 	mcopy -i $(DISK_IMG) $(BOOTLOADER_BIN) ::/EFI/BOOT/BOOTX64.EFI
-	mcopy -i $(DISK_IMG) $(KERNEL_BIN) ::/EFI/BOOT
+	mcopy -i $(DISK_IMG) $(KERNEL_BIN) ::/EFI/BOOT/
 
 run: vdisk
 	qemu-system-x86_64 \

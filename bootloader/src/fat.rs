@@ -171,130 +171,263 @@ impl<'a> FatFs<'a> {
 
     pub fn list_directory<S: AsRef<str>>(
         &mut self,
-        _path: S,
-    ) -> Result<Vec<DirectoryEntry>, &'static str> {
+        path: S,
+    ) -> Result<Vec<FatDirectoryEntry>, &'static str> {
         const BYTES_PER_ENTRY: usize = 32;
+
+        let mut entries = Vec::new();
+
+        let tokens = path.as_ref().split("/");
+        for token in tokens {
+            if token.is_empty() {
+                continue;
+            }
+            crate::println!("Token: {}", token);
+        }
 
         assert!((self.root_directory_entry_count * BYTES_PER_ENTRY) % self.bytes_per_sector == 0);
         let root_sector_count =
             self.root_directory_entry_count * BYTES_PER_ENTRY / self.bytes_per_sector;
         let buffer = self.read_sectors(self.root_cluster, root_sector_count)?;
+        assert!(buffer.len() == self.root_directory_entry_count * BYTES_PER_ENTRY);
 
-        let max_i = self
-            .root_directory_entry_count
-            .min(buffer.len() / BYTES_PER_ENTRY);
-        for i in 0..max_i {
-            let entry = &buffer[(i * BYTES_PER_ENTRY)..((i + 1) * BYTES_PER_ENTRY)];
-
-            // if the first byte of the entry is equal to 0 then there are no more
-            // files/directories in this directory
-            if entry[0] == 0 {
-                break;
+        let mut cur = Cursor::new(&buffer);
+        while cur.remaining() >= BYTES_PER_ENTRY {
+            match FatDirectoryEntry::read_from(&mut cur) {
+                (Some(entry), done) => {
+                    assert!(!done);
+                    crate::println!("Entry: {:?}", entry);
+                    entries.push(entry);
+                },
+                (None, done) => {
+                    if done {
+                        break;
+                    } else {
+                        cur.skip(BYTES_PER_ENTRY);
+                    }
+                },
             }
-
-            // if the first byte of the entry is equal to 0xE5 then the entry is unused
-            if entry[0] == 0xE5 {
-                continue;
-            }
-
-            // if the 12th byte is equal to 0x0F then this is a long file name entry
-            if entry[11] == 0x0F {
-                todo!("long file name entries");
-            }
-
-            let start_cluster = ((entry[0x14] as u32) << 24)
-                | ((entry[0x15] as u32) << 16)
-                | ((entry[0x1A] as u32) << 8)
-                | entry[0x1B] as u32;
-            // let size = ((entry[0x1C] as u32) << 24)
-            //     | ((entry[0x1D] as u32) << 16)
-            //     | ((entry[0x1E] as u32) << 8)
-            //     | entry[0x1F] as u32;
-            let size = u32::from_le_bytes(entry[0x1C..0x20].try_into().unwrap());
-
-            let name = str::from_utf8(&entry[0..8]).unwrap().trim();
-            let extension = str::from_utf8(&entry[8..11]).unwrap();
-            let full_name = if extension == "   " {
-                name.to_owned()
-            } else {
-                alloc::format!("{}.{}", name, extension)
-            };
-
-            crate::println!("> entry {i}: {:?}", entry);
-            crate::println!("  > name: {}", full_name);
-            crate::println!("  > start cluster: {}", start_cluster);
-            crate::println!("  > size: {}", size);
         }
 
-        todo!();
+        Ok(entries)
     }
 }
 
-#[derive(Debug)]
-pub struct DirectoryEntry;
-
 #[derive(Debug, Clone)]
-struct FatDirectoryEntry {
+pub struct FatDirectoryEntry {
     pub name: String,
+    pub long_name: Option<String>,
     pub attributes: u8,
-    reserved: u8,
     pub ctime_10ms: u8,
     pub ctime: u16,
     pub cdate: u16,
     pub adate: u16,
-    pub start_cluster_h: u16,
     pub mtime: u16,
     pub mdate: u16,
-    pub start_cluster_l: u16,
+    pub start_cluster: u32,
     pub size: u32,
 }
 
 impl FatDirectoryEntry {
-    fn parse(data: &[u8]) -> Option<Self> {
-        if data.len() != 32 {
-            return None;
+    fn read_from(buffer: &mut Cursor) -> (Option<Self>, bool) {
+        let start_position = buffer.position();
+        assert!(buffer.remaining() >= 32);
+
+        // TODO: implement LFN or decide not to
+        let long_name = None;
+        while buffer.remaining() >= 32 && buffer.peek_u8(11) == 0x0F {
+            // crate::println!("LFN bytes: {:?}", buffer.read_bytes(32));
+            // todo!("long file name entries");
+            buffer.skip(32);
+        }
+
+        if buffer.remaining() < 32 {
+            return (None, false);
+        }
+
+        // if the first byte of the entry is equal to 0 then there are no more
+        // files/directories in this directory
+        if buffer.peek_u8(0) == 0 {
+            return (None, true);
         }
 
         let name = {
-            let name = str::from_utf8(&data[0..8]).ok()?.trim();
-            let extension = str::from_utf8(&data[8..11]).ok()?;
+            let buffer = buffer.read_bytes(11);
 
-            if extension == "   " {
+            // let name = str::from_utf8(&buffer[0..8]).ok()?.trim();
+            let name = match str::from_utf8(&buffer[0..8]) {
+                Ok(s) => s.trim(),
+                Err(_) => return (None, false),
+            };
+            // let extension = str::from_utf8(&buffer[8..11]).ok()?.trim();
+            let extension = match str::from_utf8(&buffer[8..11]) {
+                Ok(s) => s.trim(),
+                Err(_) => return (None, false),
+            };
+
+            if extension.is_empty() {
                 name.to_owned()
             } else {
                 alloc::format!("{}.{}", name, extension)
             }
         };
 
-        let attributes = data[0x0B];
-        let ctime_10ms = data[0x0D];
-        let ctime = ((data[0x0E] as u16) << 8) | data[0x0F] as u16;
-        let cdate = ((data[0x10] as u16) << 8) | data[0x11] as u16;
-        let adate = ((data[0x12] as u16) << 8) | data[0x13] as u16;
-        let start_cluster_h = ((data[0x14] as u16) << 8) | data[0x15] as u16;
-        let mtime = ((data[0x16] as u16) << 8) | data[0x17] as u16;
-        let mdate = ((data[0x18] as u16) << 8) | data[0x19] as u16;
-        let start_cluster_l = ((data[0x1A] as u16) << 8) | data[0x1B] as u16;
-        let size = ((data[0x1C] as u32) << 24)
-            | ((data[0x1D] as u32) << 16)
-            | ((data[0x1E] as u32) << 8)
-            | data[0x1F] as u32;
+        let attributes = buffer.read_u8();
 
-        Some(Self {
+        let _reserved = buffer.read_u8();
+        let ctime_10ms = buffer.read_u8();
+        let ctime = buffer.read_u16_le();
+        let cdate = buffer.read_u16_le();
+        let adate = buffer.read_u16_le();
+        let start_cluster_h = buffer.read_u16_le();
+        let mtime = buffer.read_u16_le();
+        let mdate = buffer.read_u16_le();
+        let start_cluster_l = buffer.read_u16_le();
+        let size = buffer.read_u32_le();
+
+        let start_cluster = ((start_cluster_h as u32) << 16) | start_cluster_l as u32;
+
+        let end_position = buffer.position();
+        let total_read = end_position - start_position;
+        assert!(total_read % 32 == 0);
+
+        (Some(Self {
             name,
+            long_name,
             attributes,
-            reserved: 0,
             ctime_10ms,
             ctime,
             cdate,
             adate,
-            start_cluster_h,
             mtime,
             mdate,
-            start_cluster_l,
+            start_cluster,
             size,
-        })
+        }), false)
     }
+
+    fn is_volume_id(&self) -> bool {
+        self.attributes & 0x08 != 0
+    }
+
+    fn is_directory(&self) -> bool {
+        self.attributes & 0x10 != 0
+    }
+
+    // TODO: confirm whether this is the correct check
+    fn is_file(&self) -> bool {
+        !(self.is_volume_id() || self.is_directory())
+    }
+}
+
+#[derive(Debug)]
+pub struct Cursor<'a> {
+    buffer: &'a [u8],
+    pos: usize,
+}
+
+#[allow(unused)]
+impl<'a> Cursor<'a> {
+    pub fn new<B: AsRef<[u8]> + ?Sized>(buffer: &'a B) -> Self {
+        let buffer = buffer.as_ref();
+        Self { buffer, pos: 0 }
+    }
+}
+
+#[allow(unused)]
+impl Cursor<'_> {
+    pub fn position(&self) -> usize {
+        self.pos
+    }
+
+    pub fn remaining(&self) -> usize {
+        self.buffer.len() - self.pos
+    }
+
+    pub fn skip(&mut self, n: usize) {
+        if self.remaining() < n {
+            panic!("out of bounds: not enough bytes remaining");
+        }
+        self.pos += n;
+    }
+
+    pub fn peek_u8(&self, n: usize) -> u8 {
+        if self.remaining() < n + 1 {
+            panic!("out of bounds: not enough bytes remaining");
+        }
+        return self.buffer[self.pos + n];
+    }
+
+    pub fn read_u8(&mut self) -> u8 {
+        if self.remaining() < 1 {
+            panic!("out of bounds: not enough bytes remaining");
+        }
+        let x = self.buffer[self.pos];
+        self.pos += 1;
+        return x;
+    }
+    
+    fn get_bytes<const N: usize>(&mut self) -> [u8; N] {
+        if self.remaining() < N {
+            panic!("out of bounds: not enough bytes remaining in buffer");
+        }
+        let x = &self.buffer[self.pos..(self.pos + N)];
+        self.pos += N;
+        return x.try_into().unwrap();
+    }
+
+    pub fn read(&mut self, buffer: &mut [u8]) {
+        if self.remaining() < buffer.len() {
+            panic!("out of bounds: not enough bytes remaining in buffer");
+        }
+        buffer.copy_from_slice(&self.buffer[self.pos..(self.pos + buffer.len())]);
+        self.pos += buffer.len();
+    }
+
+    pub fn read_bytes(&mut self, count: usize) -> &[u8] {
+        if self.remaining() < count {
+            panic!("out of bounds: not enough bytes remaining in buffer");
+        }
+        let res = &self.buffer[self.pos..(self.pos + count)];
+        self.pos += count;
+        return res;
+    }
+}
+
+// #![feature(macro_metavar_expr_concat)]
+
+macro_rules! cursor_impl_read {
+    { $($name_ne:ident, $name_le:ident, $name_be:ident, $t:ty);* $(;)? } => {
+        #[allow(unused)]
+        impl Cursor<'_> {
+            $(
+                pub fn $name_ne(&mut self) -> $t {
+                    <$t>::from_ne_bytes(self.get_bytes())
+                }
+
+                pub fn $name_le(&mut self) -> $t {
+                    <$t>::from_ne_bytes(self.get_bytes())
+                }
+
+                pub fn $name_be(&mut self) -> $t {
+                    <$t>::from_ne_bytes(self.get_bytes())
+                }
+            )*
+        }
+    }
+}
+
+cursor_impl_read! {
+    read_u16, read_u16_le, read_u16_be, u16;
+    read_i16, read_i16_le, read_i16_be, i16;
+    read_u32, read_u32_le, read_u32_be, u32;
+    read_i32, read_i32_le, read_i32_be, i32;
+    read_u64, read_u64_le, read_u64_be, u64;
+    read_i64, read_i64_le, read_i64_be, i64;
+    read_u128, read_u128_le, read_u128_be, u128;
+    read_i128, read_i128_le, read_i128_be, i128;
+    read_usize, read_usize_le, read_usize_be, usize;
+    read_isize, read_isize_le, read_isize_be, isize;
 }
 
 #[derive(Debug, Clone, Copy)]
