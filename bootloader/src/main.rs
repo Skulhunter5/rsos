@@ -96,7 +96,8 @@ macro_rules! println {
 #[global_allocator]
 static GLOBAL_ALLOCATOR: BootloaderAllocator = BootloaderAllocator;
 
-const HEAP_SIZE: usize = 512 * 1024;
+// const HEAP_SIZE: usize = 512 * 1024;
+const HEAP_SIZE: usize = 16 * 1024 * 1024;
 static mut HEAP: [u8; HEAP_SIZE] = [0u8; HEAP_SIZE];
 #[allow(static_mut_refs)]
 static mut HEAP_PTR: *const u8 = unsafe { HEAP.as_ptr() };
@@ -213,8 +214,10 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     let mut partition = PartitionDevice::new(port, partition);
 
     let mut fs = FatFs::wrap(&mut partition as &mut dyn StorageDevice).unwrap();
-    let files = fs.list_directory("/").unwrap();
+    let files = fs.list_directory("/EFI/BOOT").unwrap();
     println!("Files: {:?}", &files);
+    let kernel = fs.read_file("/EFI/BOOT/KERNEL").unwrap();
+    println!("Kernel size: {} bytes", kernel.len());
 
     // let mut buffer = [0u8; 4 * 1024];
     // let sector_count = 1;

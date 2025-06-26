@@ -15,6 +15,7 @@ pub struct FatFs<'a> {
     root_cluster: usize,
     root_directory_entry_count: usize,
     first_data_sector: usize,
+    fat: Option<Fat>,
 }
 
 // TODO: add support for differing bytes_per_sector in fs table and sector size of the actual
@@ -31,6 +32,7 @@ impl<'a> FatFs<'a> {
             root_cluster: 0,
             root_directory_entry_count: 0,
             first_data_sector: 0,
+            fat: None,
         };
         fs.init()?;
 
@@ -148,7 +150,11 @@ impl<'a> FatFs<'a> {
         Ok(buffer)
     }
 
-    fn read_sectors(&mut self, start_sector: usize, count: usize) -> Result<Box<[u8]>, &'static str> {
+    fn read_sectors(
+        &mut self,
+        start_sector: usize,
+        count: usize,
+    ) -> Result<Box<[u8]>, &'static str> {
         let mut buffer = alloc::vec![0u8; self.bytes_per_sector * count];
         self.storage_device
             .read(&mut buffer, start_sector as u64, count as u16)?;
@@ -165,59 +171,168 @@ impl<'a> FatFs<'a> {
         Ok(buffer.into_boxed_slice())
     }
 
+    fn read_cluster_into(&mut self, cluster: usize, buffer: &mut [u8]) -> Result<(), &'static str> {
+        if buffer.len() < self.sectors_per_cluster * self.bytes_per_sector {
+            return Err("buffer too small");
+        }
+
+        let sector = self.first_sector_of_cluster(cluster);
+        self.storage_device
+            .read(buffer, sector as u64, self.sectors_per_cluster as u16)?;
+
+        Ok(())
+    }
+
     fn first_sector_of_cluster(&self, cluster: usize) -> usize {
         ((cluster - 2) * self.sectors_per_cluster) + self.first_data_sector
     }
 
     fn read_cluster_chain(&mut self, first_cluster: usize) -> Result<Vec<u8>, &'static str> {
-        todo!();
+        let fat = if let Some(fat) = &self.fat {
+            fat
+        } else {
+            let fat = self.read_fat()?;
+            self.fat = Some(fat);
+            self.fat.as_ref().unwrap()
+        };
+        let cluster_chain = fat.get_cluster_chain(first_cluster)?;
+
+        let cluster_size = self.sectors_per_cluster * self.bytes_per_sector;
+        let mut buffer = alloc::vec![0u8; cluster_chain.len() * cluster_size];
+        for i in 0..cluster_chain.len() {
+            let start = i * self.sectors_per_cluster * self.bytes_per_sector;
+            let end = start + cluster_size;
+            self.read_cluster_into(cluster_chain[i], &mut buffer[start..end])?;
+        }
+
+        Ok(buffer)
     }
 
-    fn read_fat(&mut self) -> Result<Box<[u8]>, &'static str> {
-        self.read_sectors(self.first_fat_sector, self.sectors_per_fat)
+    fn read_fat(&mut self) -> Result<Fat, &'static str> {
+        let data = self.read_sectors(self.first_fat_sector, self.sectors_per_fat)?;
+        return Ok(Fat { data, ty: FatType::Fat16 });
+    }
+
+    fn list_directory_raw(&mut self, dir: Option<FatDirectoryEntry>) -> Result<Box<[FatDirectoryEntry]>, &'static str> {
+        let mut entries = Vec::new();
+
+        let buffer = if let Some(entry) = dir {
+            if !entry.is_directory() {
+                return Err("list_directory_raw: not a directory");
+            }
+            let buffer = self.read_cluster_chain(entry.start_cluster as usize)?;
+            buffer.into_boxed_slice()
+        } else { // list root directory
+            assert!((self.root_directory_entry_count * FatDirectoryEntry::BYTES_PER_ENTRY) % self.bytes_per_sector == 0);
+            let root_sector_count =
+                self.root_directory_entry_count * FatDirectoryEntry::BYTES_PER_ENTRY / self.bytes_per_sector;
+            let buffer = self.read_sectors(self.root_cluster, root_sector_count)?;
+            assert!(buffer.len() == self.root_directory_entry_count * FatDirectoryEntry::BYTES_PER_ENTRY);
+
+            buffer
+        };
+        let mut cur = Cursor::new(&buffer);
+
+        while cur.remaining() >= FatDirectoryEntry::BYTES_PER_ENTRY {
+            match FatDirectoryEntry::read_from(&mut cur) {
+                (Some(entry), done) => {
+                    assert!(!done);
+                    entries.push(entry);
+                }
+                (None, done) => {
+                    if done {
+                        break;
+                    } else {
+                        cur.skip(FatDirectoryEntry::BYTES_PER_ENTRY);
+                    }
+                }
+            }
+        }
+
+        Ok(entries.into_boxed_slice())
     }
 
     pub fn list_directory<S: AsRef<str>>(
         &mut self,
         path: S,
-    ) -> Result<Vec<FatDirectoryEntry>, &'static str> {
-        const BYTES_PER_ENTRY: usize = 32;
+    ) -> Result<Box<[FatDirectoryEntry]>, &'static str> {
+        if !path.as_ref().starts_with('/') {
+            return Err("invalid path: must start with /");
+        }
 
-        let mut entries = Vec::new();
+        let tokens = path.as_ref().split('/').collect::<Vec<&str>>();
 
-        let tokens = path.as_ref().split("/");
-        for token in tokens {
+        let mut current_dir = self.list_directory_raw(None)?;
+        for token in &tokens {
             if token.is_empty() {
                 continue;
             }
             crate::println!("Token: {}", token);
-        }
-
-        assert!((self.root_directory_entry_count * BYTES_PER_ENTRY) % self.bytes_per_sector == 0);
-        let root_sector_count =
-            self.root_directory_entry_count * BYTES_PER_ENTRY / self.bytes_per_sector;
-        let buffer = self.read_sectors(self.root_cluster, root_sector_count)?;
-        assert!(buffer.len() == self.root_directory_entry_count * BYTES_PER_ENTRY);
-
-        let mut cur = Cursor::new(&buffer);
-        while cur.remaining() >= BYTES_PER_ENTRY {
-            match FatDirectoryEntry::read_from(&mut cur) {
-                (Some(entry), done) => {
-                    assert!(!done);
-                    crate::println!("Entry: {:?}", entry);
-                    entries.push(entry);
-                },
-                (None, done) => {
-                    if done {
-                        break;
-                    } else {
-                        cur.skip(BYTES_PER_ENTRY);
-                    }
-                },
+            let entry = current_dir.iter().find(|entry| entry.name.to_uppercase() == token.to_uppercase());
+            if let Some(entry) = entry {
+                current_dir = self.list_directory_raw(Some(entry.clone()))?;
+            } else {
+                return Err("no such file or directory");
             }
         }
 
-        Ok(entries)
+        Ok(current_dir)
+    }
+
+    fn read_file_raw(&mut self, entry: FatDirectoryEntry) -> Result<Box<[u8]>, &'static str> {
+        if !entry.is_file() {
+            return Err("not a file");
+        }
+
+        let first_cluster = entry.start_cluster as usize;
+        let mut file_content = self.read_cluster_chain(first_cluster)?;
+        let file_size = entry.size as usize;
+        if file_size > file_content.len() {
+            return Err("invalid file size");
+        }
+        file_content.resize(file_size, 0);
+
+        Ok(file_content.into_boxed_slice())
+    }
+
+    pub fn read_file<S: AsRef<str>>(&mut self, path: S) -> Result<Box<[u8]>, &'static str> {
+        if !path.as_ref().starts_with('/') {
+            return Err("invalid path: must start with /");
+        }
+
+        let tokens = path.as_ref().split('/').collect::<Vec<&str>>();
+        let index = tokens.iter().rev().position(|token| !token.is_empty());
+        if let Some(index) = index {
+            let index = tokens.len() - 1 - index;
+
+            let mut current_dir = self.list_directory_raw(None)?;
+            for token in &tokens[..index] {
+                if token.is_empty() {
+                    continue;
+                }
+                crate::println!("Token: {}", token);
+                let entry = current_dir.iter().find(|entry| entry.name.to_uppercase() == token.to_uppercase());
+                if let Some(entry) = entry {
+                    current_dir = self.list_directory_raw(Some(entry.clone()))?;
+                } else {
+                    return Err("no such file or directory");
+                }
+            }
+
+            let file_token = tokens[index];
+            assert!(!file_token.is_empty());
+            let entry = current_dir.iter().find(|entry| entry.name.to_uppercase() == file_token.to_uppercase());
+            if let Some(entry) = entry {
+                if !entry.is_file() {
+                    return Err("not a file");
+                }
+                return self.read_file_raw(entry.clone());
+            } else {
+                return Err("no such file or directory");
+            }
+        } else {
+            return Err("no such file or directory");
+        }
     }
 }
 
@@ -237,14 +352,16 @@ impl Fat {
                 loop {
                     clusters.push(current);
 
-                    let i = current * 2;
-                    let next = u16::from_le_bytes(self.data[i..(i+2)].try_into().unwrap()) as usize;
+                    let index = current * 2;
+                    let next = u16::from_le_bytes(self.data[index..(index + 2)].try_into().unwrap())
+                        as usize;
                     current = next;
 
                     match next {
                         0 => return Err("free cluster in cluster chain"),
                         0xFFF7 => return Err("defect cluster in cluster chain"),
-                        0xFFF8..=0xFFFF => break,
+                        0x1 => return Err("1 in cluster chain (reserved)"),
+                        0xFFF8.. => break, // last cluster in chain
                         0x0002..=0xFFF6 => continue,
                     }
                 }
@@ -279,19 +396,21 @@ pub struct FatDirectoryEntry {
 }
 
 impl FatDirectoryEntry {
+    const BYTES_PER_ENTRY: usize = 32;
+
     fn read_from(buffer: &mut Cursor) -> (Option<Self>, bool) {
         let start_position = buffer.position();
-        assert!(buffer.remaining() >= 32);
+        assert!(buffer.remaining() >= Self::BYTES_PER_ENTRY);
 
         // TODO: implement LFN or decide not to
         let long_name = None;
-        while buffer.remaining() >= 32 && buffer.peek_u8(11) == 0x0F {
+        while buffer.remaining() >= Self::BYTES_PER_ENTRY && buffer.peek_u8(11) == 0x0F {
             // crate::println!("LFN bytes: {:?}", buffer.read_bytes(32));
             // todo!("long file name entries");
-            buffer.skip(32);
+            buffer.skip(Self::BYTES_PER_ENTRY);
         }
 
-        if buffer.remaining() < 32 {
+        if buffer.remaining() < Self::BYTES_PER_ENTRY {
             return (None, false);
         }
 
@@ -339,21 +458,24 @@ impl FatDirectoryEntry {
 
         let end_position = buffer.position();
         let total_read = end_position - start_position;
-        assert!(total_read % 32 == 0);
+        assert!(total_read % Self::BYTES_PER_ENTRY == 0);
 
-        (Some(Self {
-            name,
-            long_name,
-            attributes,
-            ctime_10ms,
-            ctime,
-            cdate,
-            adate,
-            mtime,
-            mdate,
-            start_cluster,
-            size,
-        }), false)
+        (
+            Some(Self {
+                name,
+                long_name,
+                attributes,
+                ctime_10ms,
+                ctime,
+                cdate,
+                adate,
+                mtime,
+                mdate,
+                start_cluster,
+                size,
+            }),
+            false,
+        )
     }
 
     fn is_volume_id(&self) -> bool {
@@ -416,7 +538,7 @@ impl Cursor<'_> {
         self.pos += 1;
         return x;
     }
-    
+
     fn get_bytes<const N: usize>(&mut self) -> [u8; N] {
         if self.remaining() < N {
             panic!("out of bounds: not enough bytes remaining in buffer");
