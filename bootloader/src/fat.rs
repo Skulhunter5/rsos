@@ -1,6 +1,6 @@
 use core::{fmt::Debug, mem::MaybeUninit, ptr};
 
-use alloc::{borrow::ToOwned, string::String, vec::Vec};
+use alloc::{borrow::ToOwned, boxed::Box, string::String, vec::Vec};
 
 use crate::disk::StorageDevice;
 
@@ -9,9 +9,9 @@ pub struct FatFs<'a> {
     storage_device: &'a mut dyn StorageDevice,
     bytes_per_sector: usize,
     sectors_per_cluster: usize,
-    sectors_per_fat: usize,
     total_sectors: usize,
     first_fat_sector: usize,
+    sectors_per_fat: usize,
     root_cluster: usize,
     root_directory_entry_count: usize,
     first_data_sector: usize,
@@ -25,9 +25,9 @@ impl<'a> FatFs<'a> {
             storage_device,
             bytes_per_sector: 0,
             sectors_per_cluster: 0,
-            sectors_per_fat: 0,
             total_sectors: 0,
             first_fat_sector: 0,
+            sectors_per_fat: 0,
             root_cluster: 0,
             root_directory_entry_count: 0,
             first_data_sector: 0,
@@ -148,25 +148,33 @@ impl<'a> FatFs<'a> {
         Ok(buffer)
     }
 
-    fn read_sectors(&mut self, start_sector: usize, count: usize) -> Result<Vec<u8>, &'static str> {
+    fn read_sectors(&mut self, start_sector: usize, count: usize) -> Result<Box<[u8]>, &'static str> {
         let mut buffer = alloc::vec![0u8; self.bytes_per_sector * count];
         self.storage_device
             .read(&mut buffer, start_sector as u64, count as u16)?;
 
-        Ok(buffer)
+        Ok(buffer.into_boxed_slice())
     }
 
-    fn read_cluster(&mut self, cluster: usize) -> Result<Vec<u8>, &'static str> {
+    fn read_cluster(&mut self, cluster: usize) -> Result<Box<[u8]>, &'static str> {
         let mut buffer = alloc::vec![0u8; self.bytes_per_sector * self.sectors_per_cluster];
         let sector = self.first_sector_of_cluster(cluster);
         self.storage_device
             .read(&mut buffer, sector as u64, self.sectors_per_cluster as u16)?;
 
-        Ok(buffer)
+        Ok(buffer.into_boxed_slice())
     }
 
     fn first_sector_of_cluster(&self, cluster: usize) -> usize {
         ((cluster - 2) * self.sectors_per_cluster) + self.first_data_sector
+    }
+
+    fn read_cluster_chain(&mut self, first_cluster: usize) -> Result<Vec<u8>, &'static str> {
+        todo!();
+    }
+
+    fn read_fat(&mut self) -> Result<Box<[u8]>, &'static str> {
+        self.read_sectors(self.first_fat_sector, self.sectors_per_fat)
     }
 
     pub fn list_directory<S: AsRef<str>>(
@@ -211,6 +219,48 @@ impl<'a> FatFs<'a> {
 
         Ok(entries)
     }
+}
+
+#[derive(Debug)]
+struct Fat {
+    data: Box<[u8]>,
+    ty: FatType,
+}
+
+impl Fat {
+    fn get_cluster_chain(&self, first_cluster: usize) -> Result<Box<[usize]>, &'static str> {
+        match self.ty {
+            FatType::Fat12 => todo!(),
+            FatType::Fat16 => {
+                let mut clusters = Vec::new();
+                let mut current = first_cluster;
+                loop {
+                    clusters.push(current);
+
+                    let i = current * 2;
+                    let next = u16::from_le_bytes(self.data[i..(i+2)].try_into().unwrap()) as usize;
+                    current = next;
+
+                    match next {
+                        0 => return Err("free cluster in cluster chain"),
+                        0xFFF7 => return Err("defect cluster in cluster chain"),
+                        0xFFF8..=0xFFFF => break,
+                        0x0002..=0xFFF6 => continue,
+                    }
+                }
+
+                Ok(clusters.into_boxed_slice())
+            }
+            FatType::Fat32 => todo!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FatType {
+    Fat12,
+    Fat16,
+    Fat32,
 }
 
 #[derive(Debug, Clone)]
