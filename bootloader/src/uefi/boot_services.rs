@@ -1,8 +1,11 @@
 use core::{
     alloc::{Allocator, Layout},
     mem,
+    ptr::NonNull,
     sync::atomic::Ordering,
 };
+
+use alloc::boxed::Box;
 
 use super::{
     MemoryMap, Status, SystemTable,
@@ -45,6 +48,8 @@ impl BootServices<'_> {
             &mut descriptor_version,
         );
 
+        assert!(descriptor_size == size_of::<MemoryDescriptor>());
+
         if status == Status::BUFFER_TOO_SMALL {
             return Some(size);
         } else {
@@ -52,50 +57,47 @@ impl BootServices<'_> {
         }
     }
 
-    // TODO: get rid of the memory leak from allocating through the given allocator
-    pub fn get_memory_map<A: Allocator>(&self, alloc: A) -> Option<MemoryMap> {
-        let mut size = 0;
+    pub fn get_memory_map(&self) -> Option<MemoryMap> {
+        let required_size = self.get_memory_map_size()?;
+        assert!(required_size % size_of::<MemoryDescriptor>() == 0);
+
+        let mut buffer =
+            alloc::vec::Vec::with_capacity(required_size / size_of::<MemoryDescriptor>());
+
+        let buffer_size = buffer.capacity() * size_of::<MemoryDescriptor>();
+        assert!(buffer_size == required_size);
+
+        let mut size = buffer_size;
         let mut key = 0;
         let mut descriptor_size = 0;
         let mut descriptor_version = 0;
 
         let status = (self.table.get_memory_map)(
             &mut size,
-            core::ptr::null_mut(),
+            buffer.as_mut_ptr(),
             &mut key,
             &mut descriptor_size,
             &mut descriptor_version,
         );
-        if status != Status::BUFFER_TOO_SMALL {
+        let resulting_size = size;
+
+        assert!(status != Status::BUFFER_TOO_SMALL);
+        if status == Status::BUFFER_TOO_SMALL {
+            todo!("allocate with memory map buffer with additional space");
+        }
+        if status != Status::SUCCESS {
             return None;
         }
 
-        let layout = Layout::from_size_align(size, 8).unwrap();
-        let buf = alloc
-            .allocate(layout)
-            .expect("failed to allocate space for uefi memory map");
-        let ptr = buf.as_ptr() as *mut MemoryDescriptor;
-
-        let status = (self.table.get_memory_map)(
-            &mut size,
-            ptr,
-            &mut key,
-            &mut descriptor_size,
-            &mut descriptor_version,
-        );
-
-        if status == Status::SUCCESS {
-            let memory_map = unsafe {
-                MemoryMap::new(
-                    key,
-                    ptr as *const MemoryDescriptor,
-                    size / mem::size_of::<MemoryDescriptor>(),
-                )
-            };
-            return Some(memory_map);
+        assert!(resulting_size % size_of::<MemoryDescriptor>() == 0);
+        unsafe {
+            buffer.set_len(resulting_size / size_of::<MemoryDescriptor>());
         }
+        buffer.shrink_to_fit();
+        let map = buffer.into_boxed_slice();
 
-        return None;
+        let memory_map = MemoryMap::new(key, map);
+        return Some(memory_map);
     }
 }
 

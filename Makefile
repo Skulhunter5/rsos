@@ -22,6 +22,7 @@ run: vdisk
 	qemu-system-x86_64 \
 		-machine q35 \
 		-boot menu=off \
+		-m 2G \
 		-drive if=pflash,format=raw,readonly=on,file=./vmtest/ovmf/OVMF.fd \
 		-drive format=raw,file=$(DISK_IMG),media=disk \
 		-serial stdio

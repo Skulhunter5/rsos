@@ -51,7 +51,7 @@ macro_rules! newtype_enum {
 
 newtype_enum! {
     #[derive(Default)]
-    pub enum MemoryType: i32 => #[allow(missing_docs)] {
+    pub enum MemoryType: u32 => #[allow(missing_docs)] {
         RESERVED_MEMORY_TYPE = 0,
         LOADER_CODE = 1,
         LOADER_DATA = 2,
@@ -94,14 +94,15 @@ newtype_enum! {
 //    MaxMemoryType,
 //}
 
-#[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
+#[repr(C, align(16))]
 pub struct MemoryDescriptor {
-    ty: MemoryType,
-    physical_start: *const c_void,
-    virtual_start: *const c_void,
-    page_count: u64,
-    attribute: MemoryAttribute,
+    pub ty: MemoryType,
+    pad0: u32,
+    pub physical_start: u64,
+    pub virtual_start: u64,
+    pub page_count: u64,
+    pub attribute: MemoryAttribute,
 }
 
 #[repr(C)]

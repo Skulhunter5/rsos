@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(allocator_api)]
 #![feature(ptr_metadata)]
+#![feature(alloc_layout_extra)]
 
 extern crate alloc;
 
@@ -18,7 +19,7 @@ use disk::{Disk, PartitionDevice, StorageDevice};
 use fat::FatFs;
 use uefi::{
     SystemTable,
-    raw::{self, ImageHandle},
+    raw::{self, ImageHandle, MemoryType},
 };
 
 mod ahci;
@@ -49,7 +50,7 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
-#[cfg(all(not(target_pointer_width = "64"), not(target_pointer_width = "32")))]
+#[cfg(not(target_pointer_width = "64"))]
 compile_error!("unsupported target pointer width");
 
 //struct UefiWriter {
@@ -156,12 +157,6 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
 
     println!("Continuing!");
 
-    let memory_map_size = boot_services
-        .get_memory_map_size()
-        .expect("failed to get memory map");
-    println!("mem-map size: {}", memory_map_size);
-    let memory_map = boot_services.get_memory_map(Global).unwrap();
-    println!("memory_map: {:?}", memory_map);
     //for entry in memory_map.iter() {
     //    println!("- {:?}", entry);
     //}
@@ -220,10 +215,15 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     let kernel = fs.read_file("/EFI/BOOT/KERNEL").unwrap();
     println!("Kernel size: {} bytes", kernel.len());
 
+    println!();
     let elf = Elf::parse(&kernel).unwrap();
-    crate::println!("Elf: {:x?}", elf);
+    // println!("Elf: {:x?}", elf);
 
-    if let Some(_) = elf.section_headers.iter().position(|header| header.ty == elf::SectionType::UninitializedSpace) {
+    if let Some(_) = elf
+        .section_headers
+        .iter()
+        .position(|header| header.ty == elf::SectionType::UninitializedSpace)
+    {
         todo!("loading elf section .bss");
     }
 
@@ -232,15 +232,69 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
         .iter()
         .filter(|header| header.flags.allocated())
         .collect::<Vec<_>>();
-    crate::println!("> Sections: {:x?}", sections);
+    println!("Important sections:\n{:x?}", sections);
 
-    // let mut buffer = [0u8; 4 * 1024];
-    // let sector_count = 1;
-    // println!("Beginning read...");
-    // port.read(&mut buffer, partition.start as u64, sector_count)
-    //     .unwrap();
-    // println!("{:x?}", &buffer);
+    println!();
+    let memory_map = boot_services.get_memory_map().unwrap();
+    // println!("memory_map: {:?}", memory_map);
+    // for (i, entry) in memory_map.iter().enumerate() {
+    //     println!("- {}: {:?}", i, entry.ty);
+    // }
 
-    crate::println!("\n\nDONE -> LOOPING...");
+    let usable_memory = memory_map
+        .iter()
+        .filter(|entry| entry.ty == MemoryType::CONVENTIONAL_MEMORY)
+        .map(|entry| {
+            (
+                entry.physical_start,
+                entry.physical_start + entry.page_count * 4096,
+            )
+        })
+        .collect::<Vec<_>>();
+    let total_usable_memory = usable_memory
+        .iter()
+        .map(|(start, end)| end - start)
+        .sum::<u64>();
+    println!(
+        "usable memory: {:x?} (0x{:x} bytes total)",
+        &usable_memory, total_usable_memory
+    );
+    let reclaimable_memory = memory_map
+        .iter()
+        .filter(|entry| {
+            entry.ty == MemoryType::BOOT_SERVICES_CODE
+                || entry.ty == MemoryType::BOOT_SERVICES_DATA
+                || entry.ty == MemoryType::LOADER_CODE
+                || entry.ty == MemoryType::LOADER_DATA
+        })
+        .map(|entry| {
+            (
+                entry.physical_start,
+                entry.physical_start + entry.page_count * 4096,
+            )
+        }).fold(Vec::<(u64, u64)>::new(), |mut list, entry| {
+            if let Some(last_entry) = list.last_mut() {
+                if last_entry.1 == entry.0 {
+                    last_entry.1 = entry.1;
+                    list
+                } else {
+                    list.push(entry);
+                    list
+                }
+            } else {
+                list.push(entry);
+                list
+            }
+        });
+    let total_reclaimable_memory = reclaimable_memory
+        .iter()
+        .map(|(start, end)| end - start)
+        .sum::<u64>();
+    println!(
+        "reclaimable memory: {:x?} (0x{:x} bytes total)",
+        &reclaimable_memory, total_reclaimable_memory
+    );
+
+    println!("\n\nDONE -> LOOPING...");
     loop {}
 }
