@@ -8,9 +8,10 @@ extern crate alloc;
 use core::{alloc::GlobalAlloc, panic::PanicInfo};
 
 use ahci::AhciController;
-use alloc::{alloc::Global, string::ToString};
+use alloc::{alloc::Global, string::ToString, vec::Vec};
 use bootloader::{
     acpi::AcpiTables,
+    elf::{self, Elf},
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
 };
 use disk::{Disk, PartitionDevice, StorageDevice};
@@ -219,6 +220,20 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     let kernel = fs.read_file("/EFI/BOOT/KERNEL").unwrap();
     println!("Kernel size: {} bytes", kernel.len());
 
+    let elf = Elf::parse(&kernel).unwrap();
+    crate::println!("Elf: {:x?}", elf);
+
+    if let Some(_) = elf.section_headers.iter().position(|header| header.ty == elf::SectionType::UninitializedSpace) {
+        todo!("loading elf section .bss");
+    }
+
+    let sections = elf
+        .section_headers
+        .iter()
+        .filter(|header| header.flags.allocated())
+        .collect::<Vec<_>>();
+    crate::println!("> Sections: {:x?}", sections);
+
     // let mut buffer = [0u8; 4 * 1024];
     // let sector_count = 1;
     // println!("Beginning read...");
@@ -226,5 +241,6 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     //     .unwrap();
     // println!("{:x?}", &buffer);
 
+    crate::println!("\n\nDONE -> LOOPING...");
     loop {}
 }

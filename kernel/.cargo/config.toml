@@ -4,3 +4,8 @@ build-std = ["core", "compiler_builtins", "alloc"]
 
 [build]
 target = "x86_64-rsos-kernel.json"
+
+[target.x86_64-rsos-kernel]
+rustflags = [
+  "-C", "link-arg=-Tkernel/link.ld"
+]
