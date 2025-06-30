@@ -14,7 +14,10 @@ use core::panic::PanicInfo;
 use ahci::AhciController;
 use alloc::{string::ToString, vec::Vec};
 use bootloader::{
-    acpi::AcpiTables, allocator::LinearAllocator, elf::{self, Elf}, pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface}
+    acpi::AcpiTables,
+    allocator::LinearAllocator,
+    elf::{self, Elf},
+    pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
 };
 use disk::{Disk, PartitionDevice, StorageDevice};
 use fat::FatFs;
@@ -121,13 +124,6 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
 
     println!("Continuing!");
 
-    //for entry in memory_map.iter() {
-    //    println!("- {:?}", entry);
-    //}
-    //for i in 0..memory_map.len() {
-    //    println!("- {}: {:?}", i, memory_map.get(i));
-    //}
-
     let config_table = system_table.config_table().unwrap();
     //for entry in config_table.iter() {
     //    if entry.guid == uefi::Guid::EFI_ACPI_TABLE_GUID {
@@ -158,11 +154,6 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
 
     let mut ahci_controller =
         AhciController::try_from(storage_device).expect("failed to create AhciController");
-    // let cap = ahci_controller.generic_host_control().capabilities();
-    // println!("CAP.S64A: {}", cap.s64a());
-    // let mut ghc = ahci_controller.generic_host_control();
-    // let ghc = ghc.global_hba_control();
-    // println!("GHC.AE: {}", ghc.ae());
 
     let port = ahci_controller.get_port(0).unwrap();
     let partitions = Disk::read_partitions(port).unwrap();

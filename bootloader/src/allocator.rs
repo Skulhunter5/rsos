@@ -1,4 +1,8 @@
-use core::{alloc::GlobalAlloc, cell::UnsafeCell, sync::atomic::{AtomicUsize, Ordering}};
+use core::{
+    alloc::GlobalAlloc,
+    cell::UnsafeCell,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 unsafe impl Sync for LinearAllocator {}
 
@@ -13,7 +17,10 @@ impl LinearAllocator {
     const HEAP_SIZE: usize = 16 * 1024 * 1024;
 
     pub const fn new() -> Self {
-        Self { heap: UnsafeCell::new([0x55; Self::HEAP_SIZE]), remaining: AtomicUsize::new(Self::HEAP_SIZE) }
+        Self {
+            heap: UnsafeCell::new([0x55; Self::HEAP_SIZE]),
+            remaining: AtomicUsize::new(Self::HEAP_SIZE),
+        }
     }
 }
 
@@ -29,15 +36,19 @@ unsafe impl GlobalAlloc for LinearAllocator {
         let align_mask_to_round_down = !(align - 1);
 
         let mut allocated = 0;
-        if self.remaining.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |mut remaining| {
-            if size > remaining {
-                return None;
-            }
-            remaining -= size;
-            remaining &= align_mask_to_round_down;
-            allocated = remaining;
-            Some(remaining)
-        }).is_err() {
+        if self
+            .remaining
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |mut remaining| {
+                if size > remaining {
+                    return None;
+                }
+                remaining -= size;
+                remaining &= align_mask_to_round_down;
+                allocated = remaining;
+                Some(remaining)
+            })
+            .is_err()
+        {
             return core::ptr::null_mut();
         }
 
