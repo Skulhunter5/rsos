@@ -6,7 +6,7 @@
 
 extern crate alloc;
 
-use core::{alloc::GlobalAlloc, panic::PanicInfo};
+use core::{alloc::GlobalAlloc, cell::UnsafeCell, panic::PanicInfo, sync::atomic::{AtomicUsize, Ordering}};
 
 use ahci::AhciController;
 use alloc::{alloc::Global, string::ToString, vec::Vec};
@@ -96,37 +96,50 @@ macro_rules! println {
 }
 
 #[global_allocator]
-static GLOBAL_ALLOCATOR: BootloaderAllocator = BootloaderAllocator;
+static GLOBAL_ALLOCATOR: LinearAllocator = LinearAllocator::new();
 
-// const HEAP_SIZE: usize = 512 * 1024;
-const HEAP_SIZE: usize = 16 * 1024 * 1024;
-static mut HEAP: [u8; HEAP_SIZE] = [0u8; HEAP_SIZE];
-#[allow(static_mut_refs)]
-static mut HEAP_PTR: *const u8 = unsafe { HEAP.as_ptr() };
-#[allow(static_mut_refs)]
-const HEAP_END: *const u8 = unsafe { HEAP.as_ptr().byte_add(HEAP_SIZE) };
+unsafe impl Sync for LinearAllocator {}
 
-struct BootloaderAllocator;
+#[repr(C, align(4096))]
+struct LinearAllocator {
+    heap: UnsafeCell<[u8; Self::HEAP_SIZE]>,
+    remaining: AtomicUsize,
+}
 
-// TODO: make the global allocator threadsafe
-unsafe impl GlobalAlloc for BootloaderAllocator {
+impl LinearAllocator {
+    const MAX_SUPPORTED_ALIGN: usize = 4096;
+    const HEAP_SIZE: usize = 16 * 1024 * 1024;
+
+    const fn new() -> Self {
+        Self { heap: UnsafeCell::new([0x55; Self::HEAP_SIZE]), remaining: AtomicUsize::new(Self::HEAP_SIZE) }
+    }
+}
+
+unsafe impl GlobalAlloc for LinearAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        if unsafe { HEAP_PTR } >= HEAP_END {
-            return 0 as *mut u8;
+        let size = layout.size();
+        let align = layout.align();
+
+        if align > Self::MAX_SUPPORTED_ALIGN {
+            return core::ptr::null_mut();
         }
 
-        let ptr = unsafe { HEAP_PTR };
-        let off = layout.size() - (ptr as usize % layout.align());
-        let aligned_ptr = unsafe { ptr.byte_add(off) };
-        unsafe {
-            HEAP_PTR = aligned_ptr.byte_add(layout.size());
+        let align_mask_to_round_down = !(align - 1);
+
+        let mut allocated = 0;
+        if self.remaining.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |mut remaining| {
+            if size > remaining {
+                return None;
+            }
+            remaining -= size;
+            remaining &= align_mask_to_round_down;
+            allocated = remaining;
+            Some(remaining)
+        }).is_err() {
+            return core::ptr::null_mut();
         }
 
-        if unsafe { HEAP_PTR.byte_sub(1) } >= HEAP_END {
-            return 0 as *mut u8;
-        }
-
-        return aligned_ptr.cast_mut();
+        unsafe { self.heap.get().cast::<u8>().add(allocated) }
     }
 
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {}
