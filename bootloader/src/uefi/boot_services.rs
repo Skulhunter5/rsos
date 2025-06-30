@@ -1,11 +1,6 @@
-use core::{
-    alloc::{Allocator, Layout},
-    mem,
-    ptr::NonNull,
-    sync::atomic::Ordering,
-};
+use core::sync::atomic::Ordering;
 
-use alloc::boxed::Box;
+use alloc::vec;
 
 use super::{
     MemoryMap, Status, SystemTable,
@@ -57,14 +52,15 @@ impl BootServices<'_> {
         }
     }
 
+    // TODO: retry getting the memory map if it doesn't succeed
     pub fn get_memory_map(&self) -> Option<MemoryMap> {
         let required_size = self.get_memory_map_size()?;
         assert!(required_size % size_of::<MemoryDescriptor>() == 0);
 
         let mut buffer =
-            alloc::vec::Vec::with_capacity(required_size / size_of::<MemoryDescriptor>());
+            vec![MemoryDescriptor::zero(); required_size / size_of::<MemoryDescriptor>()];
 
-        let buffer_size = buffer.capacity() * size_of::<MemoryDescriptor>();
+        let buffer_size = buffer.len() * size_of::<MemoryDescriptor>();
         assert!(buffer_size == required_size);
 
         let mut size = buffer_size;
@@ -80,24 +76,22 @@ impl BootServices<'_> {
             &mut descriptor_version,
         );
         let resulting_size = size;
+        assert!(resulting_size <= required_size);
 
         assert!(status != Status::BUFFER_TOO_SMALL);
-        if status == Status::BUFFER_TOO_SMALL {
-            todo!("allocate with memory map buffer with additional space");
-        }
         if status != Status::SUCCESS {
             return None;
         }
 
         assert!(resulting_size % size_of::<MemoryDescriptor>() == 0);
-        unsafe {
-            buffer.set_len(resulting_size / size_of::<MemoryDescriptor>());
-        }
+        buffer.resize(
+            resulting_size / size_of::<MemoryDescriptor>(),
+            MemoryDescriptor::zero(),
+        );
         buffer.shrink_to_fit();
         let map = buffer.into_boxed_slice();
 
-        let memory_map = MemoryMap::new(key, map);
-        return Some(memory_map);
+        Some(MemoryMap::new(key, map))
     }
 }
 

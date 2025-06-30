@@ -105,6 +105,19 @@ pub struct MemoryDescriptor {
     pub attribute: MemoryAttribute,
 }
 
+impl MemoryDescriptor {
+    pub fn zero() -> Self {
+        Self {
+            ty: MemoryType(0),
+            pad0: 0,
+            physical_start: 0,
+            virtual_start: 0,
+            page_count: 0,
+            attribute: MemoryAttribute(0),
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct MemoryAttribute(u64);
