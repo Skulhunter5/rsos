@@ -9,3 +9,4 @@ pub mod elf;
 pub mod io;
 pub mod pci;
 pub mod spin;
+pub mod allocator;

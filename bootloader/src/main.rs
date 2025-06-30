@@ -4,16 +4,17 @@
 #![feature(ptr_metadata)]
 #![feature(alloc_layout_extra)]
 
+#[cfg(not(target_pointer_width = "64"))]
+compile_error!("unsupported target pointer width");
+
 extern crate alloc;
 
-use core::{alloc::GlobalAlloc, cell::UnsafeCell, panic::PanicInfo, sync::atomic::{AtomicUsize, Ordering}};
+use core::panic::PanicInfo;
 
 use ahci::AhciController;
-use alloc::{alloc::Global, string::ToString, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 use bootloader::{
-    acpi::AcpiTables,
-    elf::{self, Elf},
-    pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
+    acpi::AcpiTables, allocator::LinearAllocator, elf::{self, Elf}, pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface}
 };
 use disk::{Disk, PartitionDevice, StorageDevice};
 use fat::FatFs;
@@ -49,9 +50,6 @@ fn panic(info: &PanicInfo) -> ! {
     // End the panic handler in an infinite loop to halt the system
     loop {}
 }
-
-#[cfg(not(target_pointer_width = "64"))]
-compile_error!("unsupported target pointer width");
 
 //struct UefiWriter {
 //    con_out: *mut uefi::SimpleTextOutputProtocol,
@@ -97,53 +95,6 @@ macro_rules! println {
 
 #[global_allocator]
 static GLOBAL_ALLOCATOR: LinearAllocator = LinearAllocator::new();
-
-unsafe impl Sync for LinearAllocator {}
-
-#[repr(C, align(4096))]
-struct LinearAllocator {
-    heap: UnsafeCell<[u8; Self::HEAP_SIZE]>,
-    remaining: AtomicUsize,
-}
-
-impl LinearAllocator {
-    const MAX_SUPPORTED_ALIGN: usize = 4096;
-    const HEAP_SIZE: usize = 16 * 1024 * 1024;
-
-    const fn new() -> Self {
-        Self { heap: UnsafeCell::new([0x55; Self::HEAP_SIZE]), remaining: AtomicUsize::new(Self::HEAP_SIZE) }
-    }
-}
-
-unsafe impl GlobalAlloc for LinearAllocator {
-    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        let size = layout.size();
-        let align = layout.align();
-
-        if align > Self::MAX_SUPPORTED_ALIGN {
-            return core::ptr::null_mut();
-        }
-
-        let align_mask_to_round_down = !(align - 1);
-
-        let mut allocated = 0;
-        if self.remaining.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |mut remaining| {
-            if size > remaining {
-                return None;
-            }
-            remaining -= size;
-            remaining &= align_mask_to_round_down;
-            allocated = remaining;
-            Some(remaining)
-        }).is_err() {
-            return core::ptr::null_mut();
-        }
-
-        unsafe { self.heap.get().cast::<u8>().add(allocated) }
-    }
-
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {}
-}
 
 pub unsafe fn halt() {
     unsafe {
