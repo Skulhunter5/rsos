@@ -31,6 +31,7 @@ mod disk;
 mod fat;
 mod uart;
 pub mod uefi;
+pub mod uefi2;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -106,7 +107,14 @@ pub unsafe fn halt() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::tables::SystemTable) {
+pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tables::SystemTable) {
+    unsafe {
+        uefi2::init(
+            handle as uefi2::raw::Handle,
+            system_table as *mut uefi2::raw::SystemTable,
+        );
+    }
+
     let system_table = unsafe { system_table.as_mut().expect("UEFI SystemTable is nullptr") };
     let system_table = unsafe { SystemTable::from(system_table) };
 
@@ -189,16 +197,15 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
         .collect::<Vec<_>>();
     println!("Important sections:\n{:x?}", sections);
 
-    println!();
-    let memory_map = boot_services.get_memory_map().unwrap();
-    // println!("memory_map: {:?}", memory_map);
-    // for (i, entry) in memory_map.iter().enumerate() {
-    //     println!("- {}: {:?}", i, entry.ty);
-    // }
+    drop(stdout);
+    drop(boot_services);
+    drop(system_table);
+
+    let memory_map = unsafe { uefi2::boot::exit_boot_services() };
 
     let usable_memory = memory_map
         .iter()
-        .filter(|entry| entry.ty == MemoryType::CONVENTIONAL_MEMORY)
+        .filter(|entry| entry.ty == uefi2::raw::MemoryType::CONVENTIONAL_MEMORY)
         .map(|entry| {
             (
                 entry.physical_start,
@@ -217,10 +224,10 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
     let reclaimable_memory = memory_map
         .iter()
         .filter(|entry| {
-            entry.ty == MemoryType::BOOT_SERVICES_CODE
-                || entry.ty == MemoryType::BOOT_SERVICES_DATA
-                || entry.ty == MemoryType::LOADER_CODE
-                || entry.ty == MemoryType::LOADER_DATA
+            entry.ty == uefi2::raw::MemoryType::BOOT_SERVICES_CODE
+                || entry.ty == uefi2::raw::MemoryType::BOOT_SERVICES_DATA
+                || entry.ty == uefi2::raw::MemoryType::LOADER_CODE
+                || entry.ty == uefi2::raw::MemoryType::LOADER_DATA
         })
         .map(|entry| {
             (
