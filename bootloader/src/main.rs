@@ -272,7 +272,8 @@ pub extern "efiapi" fn efi_main(_handle: ImageHandle, system_table: *mut raw::ta
                 entry.physical_start,
                 entry.physical_start + entry.page_count * 4096,
             )
-        }).fold(Vec::<(u64, u64)>::new(), |mut list, entry| {
+        })
+        .fold(Vec::<(u64, u64)>::new(), |mut list, entry| {
             if let Some(last_entry) = list.last_mut() {
                 if last_entry.1 == entry.0 {
                     last_entry.1 = entry.1;
