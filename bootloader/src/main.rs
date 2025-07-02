@@ -108,12 +108,10 @@ pub unsafe fn halt() {
 
 #[unsafe(no_mangle)]
 pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tables::SystemTable) {
-    unsafe {
-        uefi2::init(
-            handle as uefi2::raw::Handle,
-            system_table as *mut uefi2::raw::SystemTable,
-        );
-    }
+    uefi2::init(
+        handle as uefi2::raw::Handle,
+        system_table as *mut uefi2::raw::SystemTable,
+    );
 
     let system_table = unsafe { system_table.as_mut().expect("UEFI SystemTable is nullptr") };
     let system_table = unsafe { SystemTable::from(system_table) };
@@ -201,8 +199,22 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
     drop(boot_services);
     drop(system_table);
 
+    crate::println!();
+    let pages = 256;
+    let address = uefi2::boot::allocate_pages(
+        uefi2::raw::AllocateType::AllocateAnyPages,
+        uefi2::raw::MemoryType::LOADER_DATA,
+        pages,
+        0,
+    )
+    .unwrap();
+    crate::println!("Allocated {} page(s) at 0x{:x}", pages, address);
+    uefi2::boot::free_pages(address, pages);
+    crate::println!("> freed again");
+
     let memory_map = unsafe { uefi2::boot::exit_boot_services() };
 
+    crate::println!();
     let usable_memory = memory_map
         .iter()
         .filter(|entry| entry.ty == uefi2::raw::MemoryType::CONVENTIONAL_MEMORY)

@@ -1,20 +1,19 @@
 use core::{
-    ptr::NonNull,
+    ptr,
     sync::atomic::{AtomicPtr, Ordering},
 };
 
+use bootloader::spin::Mutex;
 use raw::Handle;
 
-static IMAGE_HANDLE: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
+static IMAGE_HANDLE: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
 
-pub unsafe fn init(handle: Handle, system_table: *mut raw::SystemTable) {
-    unsafe {
-        set_image_handle(handle);
-        set_system_table(system_table);
-    }
+pub fn init(handle: Handle, system_table: *mut raw::SystemTable) {
+    set_image_handle(handle);
+    set_system_table(system_table);
 }
 
-pub unsafe fn set_image_handle(handle: Handle) {
+pub fn set_image_handle(handle: Handle) {
     IMAGE_HANDLE.store(handle, Ordering::Release);
 }
 
@@ -26,53 +25,108 @@ fn image_handle() -> Handle {
     handle
 }
 
-static SYSTEM_TABLE: AtomicPtr<raw::SystemTable> = AtomicPtr::new(core::ptr::null_mut());
+static SYSTEM_TABLE: Mutex<AtomicPtr<raw::SystemTable>> =
+    Mutex::new(AtomicPtr::new(ptr::null_mut()));
 
-pub unsafe fn set_system_table(system_table: *mut raw::SystemTable) {
-    SYSTEM_TABLE.store(system_table, Ordering::Release);
+pub fn set_system_table(system_table: *mut raw::SystemTable) {
+    SYSTEM_TABLE.lock().store(system_table, Ordering::Release);
 }
 
-fn system_table_raw() -> Option<NonNull<raw::SystemTable>> {
-    NonNull::new(SYSTEM_TABLE.load(Ordering::Acquire))
+pub fn with_system_table<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut raw::SystemTable) -> R,
+{
+    let system_table = unsafe {
+        SYSTEM_TABLE
+            .lock()
+            .load(Ordering::Acquire)
+            .as_mut()
+            .expect("global system table is not set")
+    };
+    f(system_table)
 }
 
-fn system_table_raw_panicking() -> NonNull<raw::SystemTable> {
-    system_table_raw().expect("global system table pointer not set")
-}
-
-fn boot_services_raw() -> Option<NonNull<raw::BootServices>> {
-    let st = unsafe { system_table_raw_panicking().as_ref() };
-    NonNull::new(st.boot_services)
-}
-
-fn boot_services_raw_panicking() -> NonNull<raw::BootServices> {
-    boot_services_raw().expect("boot services are not active")
+pub fn with_boot_services<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut raw::BootServices) -> R,
+{
+    let boot_services = unsafe {
+        &mut *SYSTEM_TABLE
+            .lock()
+            .load(Ordering::Acquire)
+            .as_mut()
+            .expect("global system table is not set")
+            .boot_services
+    };
+    f(boot_services)
 }
 
 pub mod boot {
     use alloc::vec;
 
+    use super::raw::{AllocateType, MemoryType};
+    use super::with_boot_services;
+
     use super::{
-        boot_services_raw_panicking, image_handle,
+        image_handle,
         memory_map::MemoryMap,
         raw::{MemoryDescriptor, Status},
     };
 
-    pub fn get_memory_map_size() -> Option<usize> {
-        let boot_services = unsafe { boot_services_raw_panicking().as_ref() };
+    pub fn allocate_pages(
+        allocate_type: AllocateType,
+        memory_type: MemoryType,
+        pages: usize,
+        address_hint: u64,
+    ) -> Option<u64> {
+        let mut address = address_hint;
+        let status = with_boot_services(|boot_services| {
+            (boot_services.allocate_pages)(allocate_type, memory_type, pages, &mut address)
+        });
+        if status != Status::SUCCESS {
+            return None;
+        }
 
+        if address != 0 {
+            return Some(address);
+        }
+
+        let mut address = address_hint;
+        let status = with_boot_services(|boot_services| {
+            (boot_services.allocate_pages)(allocate_type, memory_type, pages, &mut address)
+        });
+        if status != Status::SUCCESS {
+            return None;
+        }
+
+        assert!(address != 0);
+
+        todo!();
+    }
+
+    pub fn free_pages(address: u64, pages: usize) {
+        let status = with_boot_services(|boot_services| (boot_services.free_pages)(address, pages));
+        // TODO: figure out what to do in case the free fails
+        if status != Status::SUCCESS {
+            todo!("figure out what to do in this code branch");
+        }
+    }
+
+    pub fn get_memory_map_size() -> Option<usize> {
         let mut size = 0;
         let mut key = 0;
         let mut descriptor_size = 0;
         let mut descriptor_version = 0;
 
-        let status = (boot_services.get_memory_map)(
-            &mut size,
-            core::ptr::null_mut(),
-            &mut key,
-            &mut descriptor_size,
-            &mut descriptor_version,
-        );
+        let status = with_boot_services(|boot_services| {
+            (boot_services.get_memory_map)(
+                &mut size,
+                core::ptr::null_mut(),
+                &mut key,
+                &mut descriptor_size,
+                &mut descriptor_version,
+            )
+        });
 
         if status == Status::BUFFER_TOO_SMALL {
             return Some(size);
@@ -99,14 +153,16 @@ pub mod boot {
         let mut descriptor_size = 0;
         let mut descriptor_version = 0;
 
-        let boot_services = unsafe { boot_services_raw_panicking().as_ref() };
-        let status = (boot_services.get_memory_map)(
-            &mut size,
-            buffer.as_mut_ptr(),
-            &mut key,
-            &mut descriptor_size,
-            &mut descriptor_version,
-        );
+        let status = with_boot_services(|boot_services| {
+            (boot_services.get_memory_map)(
+                &mut size,
+                buffer.as_mut_ptr(),
+                &mut key,
+                &mut descriptor_size,
+                &mut descriptor_version,
+            )
+        });
+
         let resulting_size = size;
         assert!(resulting_size <= required_size);
 
@@ -134,8 +190,9 @@ pub mod boot {
 
             let handle = image_handle();
 
-            let boot_services = unsafe { boot_services_raw_panicking().as_ref() };
-            let status = (boot_services.exit_boot_services)(handle, memory_map.get_key());
+            let status = with_boot_services(|boot_services| {
+                (boot_services.exit_boot_services)(handle, memory_map.get_key())
+            });
 
             if status == Status::SUCCESS {
                 return memory_map;
@@ -170,7 +227,7 @@ pub mod raw {
         pub standard_error_handle: Handle,
         pub std_err: *const (),
         pub runtime_services: *const (),
-        pub boot_services: *mut BootServices,
+        pub boot_services: &'static mut BootServices,
         pub number_of_table_entries: usize,
         pub configuration_table: *mut ConfigurationTableEntry,
     }
@@ -230,8 +287,8 @@ pub mod raw {
         pub raise_tpl: *const (),
         pub restore_tpl: *const (),
         // Memory Services
-        pub allocate_pages: *const (),
-        pub free_pages: *const (),
+        pub allocate_pages: AllocatePages,
+        pub free_pages: FreePages,
         pub get_memory_map: GetMemoryMap,
         pub allocate_pool: *const (),
         pub free_pool: *const (),
@@ -265,6 +322,14 @@ pub mod raw {
         // TODO: add the remaining fields and version support
     }
 
+    pub type AllocatePages = extern "efiapi" fn(
+        allocate_type: AllocateType,
+        memory_type: MemoryType,
+        page_count: usize,
+        ptr: &mut u64,
+    ) -> Status;
+    pub type FreePages = extern "efiapi" fn(address: u64, pages: usize) -> Status;
+
     pub type GetMemoryMap = extern "efiapi" fn(
         size: &mut usize,
         buffer: *mut MemoryDescriptor,
@@ -273,9 +338,17 @@ pub mod raw {
         descriptor_version: &mut u32,
     ) -> Status;
 
+    pub type ExitBootServices = extern "efiapi" fn(handle: Handle, map_key: usize) -> Status;
+
     pub type Stall = extern "efiapi" fn(microseconds: usize) -> Status;
 
-    pub type ExitBootServices = extern "efiapi" fn(handle: Handle, map_key: usize) -> Status;
+    #[derive(Debug, Clone, Copy)]
+    #[repr(u32)]
+    pub enum AllocateType {
+        AllocateAnyPages = 0,
+        AllocateMaxAddress = 1,
+        AllocateAddress = 2,
+    }
 
     #[must_use = "this `Status` may be an error, which should be handled"]
     #[derive(PartialEq, Eq)]

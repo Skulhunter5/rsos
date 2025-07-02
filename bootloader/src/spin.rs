@@ -35,7 +35,7 @@ impl<T: ?Sized> Mutex<T> {
     }
 
     #[inline]
-    pub fn lock<'a>(&'a self) -> MutexGuard<'a, T> {
+    pub fn lock(&self) -> MutexGuard<T> {
         // Check if you can acquire the lock instantly, to improve situations with a mostly-free
         // lock.
         // If this fails, start the
