@@ -23,7 +23,7 @@ use disk::{Disk, PartitionDevice, StorageDevice};
 use fat::FatFs;
 use uefi::{
     SystemTable,
-    raw::{self, ImageHandle, MemoryType},
+    raw::{self, ImageHandle},
 };
 
 mod ahci;

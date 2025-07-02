@@ -1,6 +1,6 @@
 use core::mem;
 
-use crate::io::{inl, inw, outl};
+use crate::io::{inl, outl};
 
 mod r#type;
 pub use r#type::*;
