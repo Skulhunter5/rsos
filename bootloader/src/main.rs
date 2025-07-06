@@ -6,6 +6,8 @@
 
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("unsupported target pointer width");
+#[cfg(not(target_arch="x86_64"))]
+compile_error!("unsupported target pointer width");
 
 extern crate alloc;
 
@@ -32,6 +34,7 @@ mod fat;
 mod uart;
 pub mod uefi;
 pub mod uefi2;
+mod paging;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -269,6 +272,11 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
         "reclaimable memory: {:x?} (0x{:x} bytes total)",
         &reclaimable_memory, total_reclaimable_memory
     );
+
+    crate::println!();
+    crate::println!("cr3: {:?}", paging::read_cr3());
+    crate::println!("pml4: {:?}", unsafe { paging::Pml4::from_raw(paging::read_cr3().pml4_phys_addr()) });
+
 
     println!("\n\nDONE -> LOOPING...");
     loop {}
