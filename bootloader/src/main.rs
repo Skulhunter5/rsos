@@ -275,7 +275,8 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
 
     crate::println!();
     crate::println!("cr3: {:?}", paging::read_cr3());
-    crate::println!("pml4: {:?}", unsafe { paging::Pml4::from_raw(paging::read_cr3().pml4_phys_addr()) });
+    crate::println!("pml4: {:?}", unsafe { paging::Pml4::from_raw(paging::read_cr3().pml4_address()) });
+    crate::println!("current pml4: {:?}", unsafe { paging::Pml4::get_current() });
 
 
     println!("\n\nDONE -> LOOPING...");

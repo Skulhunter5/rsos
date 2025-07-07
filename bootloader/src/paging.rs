@@ -1,3 +1,35 @@
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct PhysicalAddress(pub u64);
+
+impl core::fmt::Debug for PhysicalAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "PhysicalAddress({:x})", self.0)
+    }
+}
+
+impl Into<u64> for PhysicalAddress {
+    fn into(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct VirtualAddress(pub u64);
+
+impl core::fmt::Debug for VirtualAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "VirtualAddress({:x})", self.0)
+    }
+}
+
+impl Into<u64> for VirtualAddress {
+    fn into(self) -> u64 {
+        self.0
+    }
+}
+
 // TODO: fix address mask to include "execute disable" bit etc.
 #[repr(transparent)]
 pub struct PageEntry(u64);
@@ -64,7 +96,13 @@ pub struct Pml4 {
 }
 
 impl Pml4 {
-    pub unsafe fn from_raw(address: u64) -> &'static mut Pml4 {
+    pub unsafe fn get_current() -> &'static mut Pml4 {
+        let address = read_cr3().pml4_address();
+        unsafe { Self::from_raw(address) }
+    }
+
+    pub unsafe fn from_raw(address: PhysicalAddress) -> &'static mut Pml4 {
+        let address: u64 = address.into();
         unsafe { (address as *mut Pml4).as_mut().unwrap() }
     }
 }
@@ -74,14 +112,14 @@ impl Pml4 {
 pub struct Cr3Value(u64);
 
 impl Cr3Value {
-    pub fn pml4_phys_addr(&self) -> u64 {
-        self.0 & !0xFFF
+    pub fn pml4_address(&self) -> PhysicalAddress {
+        PhysicalAddress(self.0 & !0xFFF)
     }
 }
 
 impl core::fmt::Debug for Cr3Value {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "Cr3Value {{ other: ??, pml4_phys_addr: 0x{:x} }}", self.pml4_phys_addr())
+        write!(f, "Cr3Value {{ other: ??, pml4_address: {:?} }}", self.pml4_address())
     }
 }
 
