@@ -6,7 +6,7 @@
 
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("unsupported target pointer width");
-#[cfg(not(target_arch="x86_64"))]
+#[cfg(not(target_arch = "x86_64"))]
 compile_error!("unsupported target pointer width");
 
 extern crate alloc;
@@ -31,10 +31,10 @@ use uefi::{
 mod ahci;
 mod disk;
 mod fat;
+mod paging;
 mod uart;
 pub mod uefi;
 pub mod uefi2;
-mod paging;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -273,11 +273,31 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
         &reclaimable_memory, total_reclaimable_memory
     );
 
-    crate::println!();
-    crate::println!("cr3: {:?}", paging::read_cr3());
-    crate::println!("pml4: {:?}", unsafe { paging::Pml4::from_raw(paging::read_cr3().pml4_address()) });
-    crate::println!("current pml4: {:?}", unsafe { paging::Pml4::get_current() });
+    println!();
+    println!("cr3: {:?}", paging::read_cr3());
+    println!("pml4: {:?}", unsafe {
+        paging::Pml4::from_raw(paging::read_cr3().pml4_address())
+    });
+    println!("current pml4: {:?}", unsafe { paging::Pml4::get_current() });
 
+    let phys_to_virt = |paddr: paging::PhysicalAddress| paging::VirtualAddress(paddr.0);
+    println!();
+    let pml4 = unsafe { paging::PageMapLevel4::get_current() };
+    println!("Page Map Level 4:");
+    // println!("> {:?}", pml4);
+    println!("> {}", pml4.count_present());
+    let pdp = pml4.next_level(0, phys_to_virt);
+    println!("Page Directory Pointer Table:");
+    // println!("> {:?}", pdp);
+    println!("> pdp[0]: {:?}", &pdp[0]);
+    println!("> {}", pdp.count_present());
+    let pd = pdp.next_level(0, phys_to_virt);
+    println!("Page Directory:");
+    // println!("> {:?}", pd);
+    println!("> pd[0]: {:?}", &pd[0]);
+    println!("> {}", pd.count_present());
+    let page_address = pdp[0].address();
+    println!("Page Address: {:?}", page_address);
 
     println!("\n\nDONE -> LOOPING...");
     loop {}
