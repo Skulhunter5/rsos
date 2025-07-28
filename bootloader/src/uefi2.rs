@@ -3,7 +3,7 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use bootloader::spin::Mutex;
+use crate::spin::Mutex;
 use raw::Handle;
 
 static IMAGE_HANDLE: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
@@ -34,13 +34,13 @@ pub fn set_system_table(system_table: *mut raw::SystemTable) {
 
 pub fn with_system_table<F, R>(f: F) -> R
 where
-    F: FnOnce(&mut raw::SystemTable) -> R,
+    F: FnOnce(&raw::SystemTable) -> R,
 {
     let system_table = unsafe {
         SYSTEM_TABLE
             .lock()
             .load(Ordering::Acquire)
-            .as_mut()
+            .as_ref()
             .expect("global system table is not set")
     };
     f(system_table)
@@ -48,17 +48,30 @@ where
 
 pub fn with_boot_services<F, R>(f: F) -> R
 where
-    F: FnOnce(&mut raw::BootServices) -> R,
+    F: FnOnce(&raw::BootServices) -> R,
 {
     let boot_services = unsafe {
-        &mut *SYSTEM_TABLE
+        SYSTEM_TABLE
             .lock()
             .load(Ordering::Acquire)
             .as_mut()
             .expect("global system table is not set")
             .boot_services
     };
+    let boot_services = unsafe { boot_services.as_ref().expect("boot services are not active") };
     f(boot_services)
+}
+
+pub fn boot_services_active() -> bool {
+    let boot_services = unsafe {
+        SYSTEM_TABLE
+            .lock()
+            .load(Ordering::Acquire)
+            .as_mut()
+            .expect("global system table is not set")
+            .boot_services
+    };
+    return !boot_services.is_null();
 }
 
 pub mod boot {
@@ -195,6 +208,10 @@ pub mod boot {
             });
 
             if status == Status::SUCCESS {
+                if super::boot_services_active() {
+                    panic!("uefi implementation did not set boot services pointer to null pointer");
+                }
+
                 return memory_map;
             }
         }
@@ -227,7 +244,7 @@ pub mod raw {
         pub standard_error_handle: Handle,
         pub std_err: *const (),
         pub runtime_services: *const (),
-        pub boot_services: &'static mut BootServices,
+        pub boot_services: *const BootServices,
         pub number_of_table_entries: usize,
         pub configuration_table: *mut ConfigurationTableEntry,
     }

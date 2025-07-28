@@ -20,6 +20,7 @@ use bootloader::{
     allocator::LinearAllocator,
     elf::{self, Elf},
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
+    uefi2,
 };
 use disk::{Disk, PartitionDevice, StorageDevice};
 use fat::FatFs;
@@ -34,7 +35,6 @@ mod fat;
 mod paging;
 mod uart;
 pub mod uefi;
-pub mod uefi2;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
