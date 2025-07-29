@@ -58,7 +58,11 @@ where
             .expect("global system table is not set")
             .boot_services
     };
-    let boot_services = unsafe { boot_services.as_ref().expect("boot services are not active") };
+    let boot_services = unsafe {
+        boot_services
+            .as_ref()
+            .expect("boot services are not active")
+    };
     f(boot_services)
 }
 
