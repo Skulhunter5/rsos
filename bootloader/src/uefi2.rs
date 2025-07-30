@@ -3,7 +3,7 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use crate::spin::Mutex;
+use common::spin::Mutex;
 use raw::Handle;
 
 static IMAGE_HANDLE: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());

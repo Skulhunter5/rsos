@@ -7,5 +7,5 @@ target = "x86_64-rsos-kernel.json"
 
 [target.x86_64-rsos-kernel]
 rustflags = [
-  "-C", "link-arg=-Tkernel/link.ld"
+  "-C", "link-arg=-Tkernel/link.ld",
 ]

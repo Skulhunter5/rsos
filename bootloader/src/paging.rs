@@ -1,3 +1,7 @@
+use core::{marker::PhantomData, mem::MaybeUninit};
+
+use bootloader::allocator::PageAllocator;
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct PhysicalAddress(pub u64);
@@ -14,7 +18,7 @@ impl PhysicalAddress {
 
 impl core::fmt::Debug for PhysicalAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "PhysicalAddress({:x})", self.0)
+        write!(f, "PhysicalAddress(0x{:x})", self.0)
     }
 }
 
@@ -24,13 +28,19 @@ impl Into<u64> for PhysicalAddress {
     }
 }
 
+impl From<u64> for PhysicalAddress {
+    fn from(address: u64) -> Self {
+        Self(address)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct VirtualAddress(pub u64);
 
 impl core::fmt::Debug for VirtualAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "VirtualAddress({:x})", self.0)
+        write!(f, "VirtualAddress(0x{:x})", self.0)
     }
 }
 
@@ -40,21 +50,54 @@ impl Into<u64> for VirtualAddress {
     }
 }
 
+impl From<u64> for VirtualAddress {
+    fn from(address: u64) -> Self {
+        Self(address)
+    }
+}
+
 // TODO: fix address mask to include "execute disable" bit etc.
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct PageEntry(u64);
 
 impl PageEntry {
+    pub fn empty() -> Self {
+        Self(0)
+    }
+
     pub fn address(&self) -> PhysicalAddress {
         PhysicalAddress(self.0 & !0xFFF)
+    }
+
+    pub fn set_address(&mut self, address: PhysicalAddress) {
+        self.0 = (self.0 & 0xFFF) | (address.0 & !0xFFF);
     }
 
     pub fn present(&self) -> bool {
         self.0 & (1 << 0) != 0
     }
 
+    pub fn set_present(&mut self, present: bool) {
+        let mask = (present as u64) << 0;
+        if present {
+            self.0 |= mask;
+        } else {
+            self.0 &= !mask;
+        }
+    }
+
     pub fn writable(&self) -> bool {
         self.0 & (1 << 1) != 0
+    }
+
+    pub fn set_writable(&mut self, writable: bool) {
+        let mask = (writable as u64) << 1;
+        if writable {
+            self.0 |= mask;
+        } else {
+            self.0 &= !mask;
+        }
     }
 
     pub fn user_access(&self) -> bool {
@@ -73,6 +116,15 @@ impl PageEntry {
         self.0 & (1 << 4) == 0
     }
 
+    pub fn set_cacheable(&mut self, cacheable: bool) {
+        let mask = (cacheable as u64) << 4;
+        if cacheable {
+            self.0 &= !mask;
+        } else {
+            self.0 |= mask;
+        }
+    }
+
     pub fn accessed(&self) -> bool {
         self.0 & (1 << 5) != 0
     }
@@ -85,11 +137,21 @@ impl PageEntry {
         self.0 & (1 << 7) != 0
     }
 
+    pub fn set_page_size(&mut self, page_size: bool) {
+        let mask = (page_size as u64) << 7;
+        if page_size {
+            self.0 |= mask;
+        } else {
+            self.0 &= !mask;
+        }
+    }
+
     pub fn execute_disabled(&self) -> bool {
         self.0 & (1 << 63) != 0
     }
 }
 
+// TODO: improve/complete this Debug implementation
 impl core::fmt::Debug for PageEntry {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         const FLAG_MAP: &[(fn(&PageEntry) -> bool, &str)] = &[
@@ -129,13 +191,32 @@ pub type PageDirectory = PageMapLevel<2, PageTable>;
 pub type PageTable = PageMapLevel<1, PageEntry>;
 
 #[derive(Debug)]
-#[repr(transparent)]
+#[repr(C, align(4096))]
 pub struct PageMapLevel<const N: usize, T> {
     entries: [PageEntry; 512],
-    _marker: core::marker::PhantomData<T>,
+    _marker: PhantomData<T>,
 }
 
+const _: () = {
+    assert!(size_of::<PageMapLevel4>() == 4096);
+    assert!(core::mem::offset_of!(PageMapLevel4, entries) == 0);
+};
+
 impl<const N: usize, T> PageMapLevel<N, T> {
+    pub fn empty() -> Self {
+        Self {
+            entries: [PageEntry::empty(); 512],
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn new_in(page_allocator: &dyn PageAllocator) -> &mut Self {
+        let ptr = page_allocator.alloc(1) as *mut MaybeUninit<Self>;
+        let table = unsafe { ptr.as_mut().unwrap() };
+        table.write(Self::empty());
+        unsafe { table.assume_init_mut() }
+    }
+
     pub unsafe fn from_raw(address: PhysicalAddress) -> &'static mut Self {
         let address: u64 = address.into();
         unsafe { (address as *mut Self).as_mut().unwrap() }
@@ -152,8 +233,18 @@ impl<const N: usize, T> PageMapLevel<N, T> {
         count
     }
 
+    pub fn is_present(&self, index: usize) -> bool {
+        self.entries[index].present()
+    }
+
     pub fn get(&self, index: usize) -> &PageEntry {
         &self.entries[index]
+    }
+
+    pub fn set(&mut self, index: usize, entry: PageEntry) -> PageEntry {
+        let previous_entry = self.entries[index].clone();
+        self.entries[index] = entry;
+        return previous_entry;
     }
 
     pub fn get_mut(&mut self, index: usize) -> &mut PageEntry {
@@ -219,8 +310,16 @@ impl Pml4 {
 pub struct Cr3Value(u64);
 
 impl Cr3Value {
+    pub fn new(pml4_address: PhysicalAddress) -> Self {
+        Self(pml4_address.0 & !0xFFF)
+    }
+
     pub fn pml4_address(&self) -> PhysicalAddress {
         PhysicalAddress(self.0 & !0xFFF)
+    }
+
+    pub fn set_pml4_address(&mut self, pml4_address: PhysicalAddress) {
+        self.0 = (self.0 & 0xFFF) | (pml4_address.0 & !0xFFF);
     }
 }
 
