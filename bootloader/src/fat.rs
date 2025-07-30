@@ -328,7 +328,6 @@ impl<'a> FatFs<'a> {
                 if token.is_empty() {
                     continue;
                 }
-                crate::println!("Token: {}", token);
                 let entry = current_dir
                     .iter()
                     .find(|entry| entry.name.to_uppercase() == token.to_uppercase());

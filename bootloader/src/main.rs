@@ -335,25 +335,29 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
 
     let mut partition = PartitionDevice::new(port, partition);
 
-    let mut fs = FatFs::wrap(&mut partition as &mut dyn StorageDevice).unwrap();
-    let files = fs.list_directory("/EFI/BOOT").unwrap();
-    println!("Files: {:?}", &files);
-    let kernel = fs.read_file("/EFI/BOOT/KERNEL").unwrap();
-    println!("Kernel size: {} bytes", kernel.len());
-
     println!();
+    println!();
+    println!();
+
+    print!("reading kernel from FAT filesystem...");
+    let mut fs = FatFs::wrap(&mut partition as &mut dyn StorageDevice).unwrap();
+    // let files = fs.list_directory("/EFI/BOOT").unwrap();
+    // println!("Files: {:?}", &files);
+    let kernel = fs.read_file("/EFI/BOOT/KERNEL").unwrap();
+    println!(" done (size: {} bytes)", kernel.len());
+
+    print!("parsing kernel elf file...");
     let elf = Elf::parse(&kernel).unwrap();
+    println!(" done");
     assert!(elf.entry != 0);
-    // println!("Elf: {:x?}", elf);
 
     let sections = elf
         .section_headers
         .iter()
         .filter(|header| header.flags.allocated())
         .collect::<Vec<_>>();
-    println!("Important sections:\n{:x?}", sections);
 
-    println!();
+    print!("copying runtime sections from file to memory...");
     let kernel_entry_point = elf.entry;
     let section_allocations = sections
         .iter()
@@ -370,43 +374,27 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                 0,
             )
             .expect("failed to allocate pages for section") as *mut u8;
+            // TODO: confirm that this is working as intended with .bss section
             if section.ty != SectionType::UninitializedSpace {
                 unsafe {
                     let src = kernel.as_ptr().byte_add(section.offset as usize);
                     ptr.copy_from_nonoverlapping(src, section.size as usize);
                 }
-            } else {
-                println!(".bss section found");
             }
             (ptr, pages, section.vaddr)
         })
         .collect::<Vec<_>>();
-    println!("section_allocations: {:x?}", &section_allocations);
-    println!("kernel_entry_point: 0x{:x}", kernel_entry_point);
+    println!(" done");
 
     drop(stdout);
     drop(boot_services);
     drop(system_table);
 
-    {
-        crate::println!();
-        let pages = 256;
-        let address = uefi2::boot::allocate_pages(
-            uefi2::raw::AllocateType::AllocateAnyPages,
-            uefi2::raw::MemoryType::LOADER_DATA,
-            pages,
-            0,
-        )
-        .unwrap();
-        crate::println!("Allocated {} page(s) at 0x{:x}", pages, address);
-        uefi2::boot::free_pages(address, pages);
-        crate::println!("> freed again");
-    }
-
     let memory_map = unsafe { uefi2::boot::exit_boot_services() };
     PAGE_ALLOCATOR.set_inner(ActivePageAllocator::Runtime);
 
-    crate::println!();
+    println!();
+    println!("exiting boot services...");
     let free_memory = memory_map
         .iter()
         .filter(|entry| entry.ty == uefi2::raw::MemoryType::CONVENTIONAL_MEMORY)
@@ -417,55 +405,57 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
             )
         })
         .collect::<Vec<_>>();
-    let total_usable_memory = free_memory
+    let _total_usable_memory = free_memory
         .iter()
         .map(|(start, end)| end - start)
         .sum::<u64>();
-    println!(
-        "usable memory: {:x?} (0x{:x} bytes total)",
-        &free_memory, total_usable_memory
-    );
+    // println!(
+    //     "usable memory: {:x?} (0x{:x} bytes total)",
+    //     &free_memory, total_usable_memory
+    // );
     RUNTIME_PAGE_ALLOCATOR.setup(&free_memory);
-    println!("Successfully switched to runtime mode");
+    println!("> success");
+    println!();
 
-    // let reclaimable_memory = memory_map
-    //     .iter()
-    //     .filter(|entry| {
-    //         entry.ty == uefi2::raw::MemoryType::BOOT_SERVICES_CODE
-    //             || entry.ty == uefi2::raw::MemoryType::BOOT_SERVICES_DATA
-    //             || entry.ty == uefi2::raw::MemoryType::LOADER_CODE
-    //             || entry.ty == uefi2::raw::MemoryType::LOADER_DATA
-    //     })
-    //     .map(|entry| {
-    //         (
-    //             entry.physical_start,
-    //             entry.physical_start + entry.page_count * 4096,
-    //         )
-    //     })
-    //     .fold(Vec::<(u64, u64)>::new(), |mut list, entry| {
-    //         if let Some(last_entry) = list.last_mut() {
-    //             if last_entry.1 == entry.0 {
-    //                 last_entry.1 = entry.1;
-    //                 list
-    //             } else {
-    //                 list.push(entry);
-    //                 list
-    //             }
-    //         } else {
-    //             list.push(entry);
-    //             list
-    //         }
-    //     });
-    // let total_reclaimable_memory = reclaimable_memory
-    //     .iter()
-    //     .map(|(start, end)| end - start)
-    //     .sum::<u64>();
+    let _reclaimable_memory = memory_map
+        .iter()
+        .filter(|entry| {
+            entry.ty == uefi2::raw::MemoryType::BOOT_SERVICES_CODE
+                || entry.ty == uefi2::raw::MemoryType::BOOT_SERVICES_DATA
+                || entry.ty == uefi2::raw::MemoryType::LOADER_CODE
+                || entry.ty == uefi2::raw::MemoryType::LOADER_DATA
+        })
+        .map(|entry| {
+            (
+                entry.physical_start,
+                entry.physical_start + entry.page_count * 4096,
+            )
+        })
+        .fold(Vec::<(u64, u64)>::new(), |mut list, entry| {
+            if let Some(last_entry) = list.last_mut() {
+                if last_entry.1 == entry.0 {
+                    last_entry.1 = entry.1;
+                    list
+                } else {
+                    list.push(entry);
+                    list
+                }
+            } else {
+                list.push(entry);
+                list
+            }
+        });
+    let _total_reclaimable_memory = _reclaimable_memory
+        .iter()
+        .map(|(start, end)| end - start)
+        .sum::<u64>();
     // println!(
     //     "reclaimable memory: {:x?} (0x{:x} bytes total)",
     //     &reclaimable_memory, total_reclaimable_memory
     // );
 
     {
+        print!("creating new paging structures...");
         let pml4 = PageMapLevel4::new_in(&PAGE_ALLOCATOR);
         let pml4_address = PhysicalAddress(ptr::from_ref(pml4) as u64);
         let mut entry_template = PageEntry::empty();
@@ -489,21 +479,17 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                 pdp.set(j as usize, pe);
             }
         }
-        println!();
-        println!("custom pml4: \n{:?}", pml4);
+        println!(" done");
 
-        println!();
+        print!("activating new paging structures...");
         let mut cr3_value = read_cr3();
-        println!("old cr3_value: {:?}", cr3_value);
         cr3_value.set_pml4_address(pml4_address);
-        println!("new cr3_value: {:?}", cr3_value);
-        println!("writing to cr3...");
         write_cr3(cr3_value);
-        println!("> reread cr3_value: {:?}", read_cr3());
+        println!(" done");
     }
 
     {
-        println!();
+        print!("mapping sections to higher half...");
         let phys_to_virt = |paddr: paging::PhysicalAddress| paging::VirtualAddress(paddr.0);
         let mut entry_template = PageEntry::empty();
         entry_template.set_present(true);
@@ -511,10 +497,10 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
         entry_template.set_cacheable(true);
 
         for (section_ptr, pages, vaddr) in section_allocations {
-            println!(
-                "mapping section: ({:?}, {}, 0x{:x})",
-                section_ptr, pages, vaddr
-            );
+            // println!(
+            //     "mapping section: ({:?}, {}, 0x{:x})",
+            //     section_ptr, pages, vaddr
+            // );
             let start_paddr = section_ptr as usize;
             let start_vaddr = vaddr as usize;
             for i in 0..pages {
@@ -524,7 +510,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
 
                 let pml4 = unsafe { PageMapLevel4::get_current() };
                 let pml4_index = (vaddr >> 39) & 0x1FF;
-                println!("> pml4[{}]", pml4_index);
+                // println!("> pml4[{}]", pml4_index);
 
                 let pdp = if pml4.is_present(pml4_index) {
                     pml4.next_level(pml4_index, phys_to_virt)
@@ -538,7 +524,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                     pdp
                 };
                 let pdp_index = (vaddr >> 30) & 0x1FF;
-                println!("> pdp[{}]", pdp_index);
+                // println!("> pdp[{}]", pdp_index);
 
                 let pd = if pdp.is_present(pdp_index) {
                     pdp.next_level(pdp_index, phys_to_virt)
@@ -552,7 +538,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                     pd
                 };
                 let pd_index = (vaddr >> 21) & 0x1FF;
-                println!("> pd[{}]", pd_index);
+                // println!("> pd[{}]", pd_index);
 
                 let pt = if pd.is_present(pd_index) {
                     pd.next_level(pd_index, phys_to_virt)
@@ -566,7 +552,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                     pt
                 };
                 let pt_index = (vaddr >> 12) & 0x1FF;
-                println!("> pt[{}]", pt_index);
+                // println!("> pt[{}]", pt_index);
 
                 if pt.is_present(pt_index) {
                     panic!(
@@ -579,15 +565,17 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                 }
             }
         }
+        println!(" done");
     }
 
     let kernel_entry_ptr = kernel_entry_point as *const ();
     // let kernel_entry: unsafe extern "C" fn(bootinfo: *const ()) -> ! = unsafe { core::mem::transmute(kernel_entry_ptr) };
     let kernel_entry: unsafe extern "C" fn(bootinfo: *const ()) -> u64 =
         unsafe { core::mem::transmute(kernel_entry_ptr) };
-    println!("Calling into kernel...");
+    println!();
+    println!("calling into kernel...");
     let result = unsafe { kernel_entry(ptr::null()) };
-    println!("> Result {}", result);
+    println!("> result {}", result);
 
     // Global Allocator
     // - backed by current Page Allocator
