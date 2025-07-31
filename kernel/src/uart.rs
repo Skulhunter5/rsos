@@ -1,7 +1,7 @@
 use core::fmt::Write;
 
 use crate::io::{inb, outb};
-use common::spin;
+use common::spin::Mutex;
 
 pub unsafe fn init() {
     unsafe {
@@ -34,7 +34,7 @@ pub unsafe fn putc(c: char) {
 
 struct UartWriter;
 
-static UART_WRITER: spin::Mutex<UartWriter> = spin::Mutex::new(UartWriter);
+static UART_WRITER: Mutex<UartWriter> = Mutex::new(UartWriter);
 
 impl Write for UartWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {

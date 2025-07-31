@@ -11,23 +11,18 @@ compile_error!("unsupported target pointer width");
 
 extern crate alloc;
 
-use core::{
-    mem::MaybeUninit,
-    panic::PanicInfo,
-    ptr,
-    sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
-};
+use core::{panic::PanicInfo, ptr};
 
 use ahci::AhciController;
 use alloc::{string::ToString, vec::Vec};
+use allocators::{BootloaderPageAllocator, RuntimePageAllocator, UefiPageAllocator};
 use bootloader::{
     acpi::AcpiTables,
-    allocator::{LinearAllocator, PageAllocator, UefiPageAllocator},
     elf::{Elf, SectionType},
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
     uefi2,
 };
-use common::spin::Mutex;
+use common::allocation::FixedBufferAllocator;
 use disk::{Disk, PartitionDevice, StorageDevice};
 use fat::FatFs;
 use paging::{
@@ -40,6 +35,7 @@ use uefi::{
 };
 
 mod ahci;
+mod allocators;
 mod disk;
 mod fat;
 mod paging;
@@ -67,6 +63,14 @@ fn panic(info: &PanicInfo) -> ! {
     // End the panic handler in an infinite loop to halt the system
     loop {}
 }
+
+const HEAP_SIZE: usize = 16 * 1024 * 1024;
+#[global_allocator]
+static GLOBAL_ALLOCATOR: FixedBufferAllocator<HEAP_SIZE> = FixedBufferAllocator::new();
+
+static PAGE_ALLOCATOR: BootloaderPageAllocator = BootloaderPageAllocator::new();
+static UEFI_PAGE_ALLOCATOR: UefiPageAllocator = UefiPageAllocator;
+static RUNTIME_PAGE_ALLOCATOR: RuntimePageAllocator = RuntimePageAllocator::new();
 
 //struct UefiWriter {
 //    con_out: *mut uefi::SimpleTextOutputProtocol,
@@ -108,161 +112,6 @@ macro_rules! print {
 macro_rules! println {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-
-const HEAP_SIZE: usize = 16 * 1024 * 1024;
-#[global_allocator]
-static GLOBAL_ALLOCATOR: LinearAllocator<HEAP_SIZE> = LinearAllocator::new();
-
-static PAGE_ALLOCATOR: BootloaderPageAllocator = BootloaderPageAllocator::new();
-static UEFI_PAGE_ALLOCATOR: UefiPageAllocator = UefiPageAllocator;
-static RUNTIME_PAGE_ALLOCATOR: RuntimePageAllocator = RuntimePageAllocator::new();
-
-pub struct Area<'a> {
-    start: *mut u8,
-    current: AtomicUsize,
-    size: usize,
-    next: Option<&'a Area<'a>>,
-}
-
-impl<'a> Area<'a> {
-    pub fn new(start: *mut u8, size: usize, next: Option<&'a Area<'a>>) -> Self {
-        Self {
-            start,
-            current: AtomicUsize::new(0),
-            size,
-            next,
-        }
-    }
-}
-
-impl PageAllocator for Area<'_> {
-    fn alloc(&self, pages: usize) -> *mut u8 {
-        let res = self
-            .current
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                if current + pages <= self.size {
-                    return Some(current + pages);
-                } else {
-                    return None;
-                }
-            });
-        match res {
-            Ok(allocated) => return unsafe { self.start.add(allocated * 4096) },
-            Err(_) => {
-                if let Some(next) = self.next {
-                    return next.alloc(pages);
-                } else {
-                    return ptr::null_mut();
-                }
-            }
-        }
-    }
-
-    fn dealloc(&self, _ptr: *mut u8, _pages: usize) {}
-}
-
-pub struct RuntimePageAllocator<'a> {
-    first_area: AtomicPtr<Area<'a>>,
-}
-
-impl RuntimePageAllocator<'_> {
-    pub const fn new() -> Self {
-        let first_area = AtomicPtr::new(ptr::null_mut());
-        Self { first_area }
-    }
-
-    pub fn setup(&self, free_memory: &Vec<(u64, u64)>) {
-        let mut next = None;
-        for (start, end) in free_memory.iter().rev() {
-            let start = if *start == 0 {
-                *start + 4096
-            } else {
-                *start
-            };
-            let end = *end;
-            assert!(start % 4096 == 0);
-            assert!(end % 4096 == 0);
-            assert!(end > start);
-
-            let ptr = start as *mut MaybeUninit<Area>;
-            let area = unsafe { ptr.as_mut().unwrap() };
-
-            let start = start + 4096;
-            let size = (end - start) as usize;
-            assert!(size % 4096 == 0);
-            let size = size / 4096;
-            area.write(Area::new(start as *mut u8, size, next));
-
-            next = Some(unsafe { area.assume_init_ref() });
-        }
-        if let Some(area) = next {
-            let ptr = area as *const Area as *mut Area;
-            self.first_area.store(ptr, Ordering::Release);
-        }
-    }
-}
-
-impl PageAllocator for RuntimePageAllocator<'_> {
-    fn alloc(&self, pages: usize) -> *mut u8 {
-        let area = unsafe {
-            self.first_area
-                .load(Ordering::Acquire)
-                .as_ref()
-                .expect("called alloc on RuntimePageAllocator before setup")
-        };
-        area.alloc(pages)
-    }
-
-    fn dealloc(&self, ptr: *mut u8, pages: usize) {
-        let area = unsafe {
-            self.first_area
-                .load(Ordering::Acquire)
-                .as_ref()
-                .expect("called dealloc on RuntimePageAllocator before setup")
-        };
-        area.dealloc(ptr, pages);
-    }
-}
-
-pub enum ActivePageAllocator {
-    Uefi,
-    Runtime,
-}
-
-impl ActivePageAllocator {
-    pub fn get_page_allocator(&self) -> &dyn PageAllocator {
-        match self {
-            Self::Uefi => &UEFI_PAGE_ALLOCATOR,
-            Self::Runtime => &RUNTIME_PAGE_ALLOCATOR,
-        }
-    }
-}
-
-pub struct BootloaderPageAllocator {
-    inner: Mutex<ActivePageAllocator>,
-}
-
-impl BootloaderPageAllocator {
-    pub const fn new() -> Self {
-        let inner = Mutex::new(ActivePageAllocator::Uefi);
-        Self { inner }
-    }
-
-    pub fn set_inner(&self, page_allocator: ActivePageAllocator) {
-        let mut inner = self.inner.lock();
-        *inner = page_allocator;
-    }
-}
-
-impl PageAllocator for BootloaderPageAllocator {
-    fn alloc(&self, pages: usize) -> *mut u8 {
-        self.inner.lock().get_page_allocator().alloc(pages)
-    }
-
-    fn dealloc(&self, ptr: *mut u8, pages: usize) {
-        self.inner.lock().get_page_allocator().dealloc(ptr, pages)
-    }
 }
 
 pub unsafe fn halt() {
@@ -395,7 +244,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
     drop(system_table);
 
     let memory_map = unsafe { uefi2::boot::exit_boot_services() };
-    PAGE_ALLOCATOR.set_inner(ActivePageAllocator::Runtime);
+    PAGE_ALLOCATOR.set_runtime();
 
     println!();
     println!("exiting boot services...");

@@ -1,6 +1,6 @@
 use core::{marker::PhantomData, mem::MaybeUninit};
 
-use bootloader::allocator::PageAllocator;
+use common::allocation::PageAllocator;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]

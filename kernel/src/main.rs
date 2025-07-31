@@ -3,9 +3,10 @@
 
 extern crate alloc;
 
-use core::{alloc::GlobalAlloc, panic::PanicInfo, ptr};
+use core::panic::PanicInfo;
 
 use alloc::string::ToString;
+use common::allocation::FixedBufferAllocator;
 
 mod io;
 mod uart;
@@ -32,18 +33,9 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
+const HEAP_SIZE: usize = 1024 * 1024;
 #[global_allocator]
-static KERNEL_ALLOCATOR: KernelAllocator = KernelAllocator;
-
-struct KernelAllocator;
-
-unsafe impl GlobalAlloc for KernelAllocator {
-    unsafe fn alloc(&self, _layout: core::alloc::Layout) -> *mut u8 {
-        ptr::null_mut()
-    }
-
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {}
-}
+static GLOBAL_ALLOCATOR: FixedBufferAllocator<HEAP_SIZE> = FixedBufferAllocator::new();
 
 #[macro_export]
 #[allow(unused)]
@@ -77,5 +69,9 @@ pub extern "C" fn kernel_main(_bootinfo: &'static BootInfo) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(_bootinfo: *const BootInfo) -> u64 {
+    unsafe {
+        uart::init();
+    }
+    println!("> Greetings from the kernel");
     return 123456;
 }
