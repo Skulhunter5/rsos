@@ -23,7 +23,7 @@ use alloc::{string::ToString, vec::Vec};
 use bootloader::{
     acpi::AcpiTables,
     allocator::{LinearAllocator, PageAllocator, UefiPageAllocator},
-    elf::{self, Elf, SectionType},
+    elf::{Elf, SectionType},
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
     uefi2,
 };
