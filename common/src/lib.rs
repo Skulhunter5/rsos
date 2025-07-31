@@ -10,4 +10,6 @@ extern crate alloc;
 mod byte_size;
 pub use byte_size::{BitSize, ByteSize};
 pub mod allocation;
+mod bootinfo;
 pub mod spin;
+pub use bootinfo::BootInfo;

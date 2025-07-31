@@ -22,7 +22,7 @@ use bootloader::{
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
     uefi2,
 };
-use common::allocation::FixedBufferAllocator;
+use common::{BootInfo, allocation::FixedBufferAllocator};
 use disk::{Disk, PartitionDevice, StorageDevice};
 use fat::FatFs;
 use paging::{
@@ -63,6 +63,12 @@ fn panic(info: &PanicInfo) -> ! {
     // End the panic handler in an infinite loop to halt the system
     loop {}
 }
+
+// Global Allocator
+// - backed by current Page Allocator
+// - maybe just do a bunch of LinearAllocators, one per area of free space without frees
+//   -> fast and simple
+//   -> memory can easily be reclaimed in kernel (at least after copying bootinfo)
 
 const HEAP_SIZE: usize = 16 * 1024 * 1024;
 #[global_allocator]
@@ -421,21 +427,25 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
         println!(" done");
     }
 
+    // let kernel_entry_ptr = kernel_entry_point as *const ();
+    // let kernel_entry: unsafe extern "sysv64" fn(bootinfo: *const ()) -> u64 =
+    //     unsafe { core::mem::transmute(kernel_entry_ptr) };
+    // println!();
+    // println!("calling into kernel...");
+    // let result = unsafe { kernel_entry(ptr::null()) };
+    // println!("> result {}", result);
+    // println!("\n\nDONE -> LOOPING...");
+    // loop {}
+
+    let bootinfo = BootInfo;
+
     let kernel_entry_ptr = kernel_entry_point as *const ();
-    // let kernel_entry: unsafe extern "C" fn(bootinfo: *const ()) -> ! = unsafe { core::mem::transmute(kernel_entry_ptr) };
-    let kernel_entry: unsafe extern "C" fn(bootinfo: *const ()) -> u64 =
+    let kernel_entry: extern "sysv64" fn(bootinfo: *const BootInfo) -> ! =
         unsafe { core::mem::transmute(kernel_entry_ptr) };
-    println!();
-    println!("calling into kernel...");
-    let result = unsafe { kernel_entry(ptr::null()) };
-    println!("> result {}", result);
+    kernel_entry(ptr::from_ref(&bootinfo));
 
-    // Global Allocator
-    // - backed by current Page Allocator
-    // - maybe just do a bunch of LinearAllocators, one per area of free space without frees
-    //   -> fast and simple
-    //   -> memory can easily be reclaimed in kernel (at least after copying bootinfo)
-
-    println!("\n\nDONE -> LOOPING...");
-    loop {}
+    #[allow(unreachable_code)]
+    {
+        panic!("kernel main function returned");
+    }
 }

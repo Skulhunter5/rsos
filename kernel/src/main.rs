@@ -6,7 +6,7 @@ extern crate alloc;
 use core::panic::PanicInfo;
 
 use alloc::string::ToString;
-use common::allocation::FixedBufferAllocator;
+use common::{BootInfo, allocation::FixedBufferAllocator};
 
 mod io;
 mod uart;
@@ -50,28 +50,18 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
-pub struct BootInfo;
-
 #[unsafe(no_mangle)]
-pub extern "C" fn kernel_main(_bootinfo: &'static BootInfo) {
+pub fn kernel_main(_bootinfo: &BootInfo) {
     todo!();
 }
 
-// #[unsafe(no_mangle)]
-// pub extern "C" fn _start(bootinfo: *const BootInfo) -> ! {
-//     unsafe { uart::init() };
-//     println!("> Greetings from the kernel");
-//     println!("  > bootinfo: {:?}", bootinfo);
-//     kernel_main(unsafe { bootinfo.as_ref().unwrap() });
-//
-//     loop {}
-// }
-
 #[unsafe(no_mangle)]
-pub extern "C" fn _start(_bootinfo: *const BootInfo) -> u64 {
+pub extern "sysv64" fn _start(bootinfo: *const BootInfo) -> ! {
     unsafe {
         uart::init();
     }
     println!("> Greetings from the kernel");
-    return 123456;
+    kernel_main(unsafe { bootinfo.as_ref().unwrap() });
+
+    loop {}
 }
