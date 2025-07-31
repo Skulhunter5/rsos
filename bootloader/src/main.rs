@@ -380,6 +380,10 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                     let src = kernel.as_ptr().byte_add(section.offset as usize);
                     ptr.copy_from_nonoverlapping(src, section.size as usize);
                 }
+            } else {
+                unsafe {
+                    ptr.write_bytes(0, section.size as usize);
+                }
             }
             (ptr, pages, section.vaddr)
         })
