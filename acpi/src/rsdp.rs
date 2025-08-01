@@ -1,32 +1,9 @@
-use core::{ffi::c_void, mem};
-
-use raw::{ConfigurationSpaceBaseAddressAllocation, SdtHeader};
-
-pub mod raw;
-
-pub type RsdpAnyVersion = c_void;
-
-pub type OemId = [u8; 6];
-
-#[derive(Debug, Clone, Copy)]
-pub enum AcpiError {
-    InvalidChecksum,
-    RsdpError(RsdpError),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum RsdpError {
-    NullPointer,
-    InvalidRevision(u8),
-    InvalidChecksum,
-    InvalidSignature([u8; 8]),
-}
-
-impl From<RsdpError> for AcpiError {
-    fn from(e: RsdpError) -> Self {
-        Self::RsdpError(e)
-    }
-}
+use crate::{
+    OemId, RsdpAnyVersion, Table,
+    error::{AcpiError, RsdpError},
+    raw::{self, SdtHeader},
+    tables::Mcfg,
+};
 
 #[derive(Debug)]
 pub enum Rsdp {
@@ -148,87 +125,5 @@ impl Rsdt {
 
     pub unsafe fn get_mcfg() -> Mcfg {
         todo!();
-    }
-}
-
-#[derive(Debug)]
-pub enum Table {
-    Mcfg(Mcfg),
-    Other(*const SdtHeader),
-}
-
-impl Table {
-    unsafe fn from(ptr: *const SdtHeader) -> Self {
-        let header = unsafe { &*ptr };
-        let size = header.length as usize - mem::size_of::<SdtHeader>();
-        match header.signature {
-            raw::MCFG_SIGNATURE => {
-                // Remove the size for the additional reserved field before the MCFG array
-                let size = size - 8;
-                let count = size / mem::size_of::<ConfigurationSpaceBaseAddressAllocation>();
-                let ptr: *const raw::Mcfg = core::ptr::from_raw_parts(ptr as *const (), count);
-                Self::Mcfg(Mcfg(ptr))
-            }
-            _ => Self::Other(ptr),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Mcfg(*const raw::Mcfg);
-
-impl Mcfg {
-    pub fn len(&self) -> usize {
-        todo!();
-    }
-}
-
-pub struct AcpiTables;
-
-impl AcpiTables {
-    //pub fn from_ptr(ptr: *const RsdpAnyVersion) -> Result<AcpiTables, AcpiError> {
-    //    let rsdp = unsafe { Rsdp::from_raw_ptr(ptr) }?;
-    //    let rsdt = rsdp.get_rsdt()?;
-    //
-    //    return Ok(Self { rsdt });
-    //}
-
-    pub unsafe fn iter(ptr: *const RsdpAnyVersion) -> Result<AcpiTableIterator, AcpiError> {
-        let rsdp = unsafe { Rsdp::from_raw_ptr(ptr) }?;
-        let rsdt = rsdp.get_rsdt()?;
-
-        Ok(AcpiTableIterator::new(rsdt))
-    }
-
-    pub fn from_rsdp(rsdp: Rsdp) -> Result<AcpiTableIterator, AcpiError> {
-        let rsdt = rsdp.get_rsdt()?;
-        Ok(AcpiTableIterator::new(rsdt))
-    }
-}
-
-#[derive(Debug)]
-pub struct AcpiTableIterator {
-    rsdt: Rsdt,
-    index: usize,
-}
-
-impl AcpiTableIterator {
-    fn new(rsdt: Rsdt) -> Self {
-        Self { rsdt, index: 0 }
-    }
-}
-
-impl Iterator for AcpiTableIterator {
-    type Item = Table;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // TODO: maybe rework this
-        let item = self.rsdt.get(self.index);
-        if let Some(item) = item {
-            self.index += 1;
-            return Some(item);
-        } else {
-            return None;
-        }
     }
 }

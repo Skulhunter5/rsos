@@ -5,7 +5,6 @@
 
 extern crate alloc;
 
-pub mod acpi;
 pub mod cursor;
 pub mod elf;
 pub mod io;

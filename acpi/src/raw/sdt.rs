@@ -1,5 +1,5 @@
 #[derive(Debug, Copy, Clone)]
-#[repr(C)]
+#[repr(C, packed)]
 pub struct SdtHeader {
     pub signature: [u8; 4],
     pub length: u32,
@@ -25,16 +25,16 @@ impl SdtHeader {
     }
 }
 
-#[derive(Debug)]
-#[repr(C)]
+// #[derive(Debug)]
+#[repr(C, packed)]
 pub struct Mcfg {
     pub header: SdtHeader,
     pub reserved: u64,
     pub base_address_allocations: [ConfigurationSpaceBaseAddressAllocation],
 }
 
-#[derive(Debug)]
-#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
 pub struct ConfigurationSpaceBaseAddressAllocation {
     pub base_address: u64,
     pub segment_group: u16,
@@ -42,3 +42,7 @@ pub struct ConfigurationSpaceBaseAddressAllocation {
     pub end_bus_number: u8,
     pub reserved: u32,
 }
+
+const _: () = {
+    assert!(size_of::<ConfigurationSpaceBaseAddressAllocation>() == 16);
+};

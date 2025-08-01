@@ -13,11 +13,11 @@ extern crate alloc;
 
 use core::{panic::PanicInfo, ptr};
 
+use acpi::AcpiTables;
 use ahci::AhciController;
 use alloc::{string::ToString, vec::Vec};
 use allocators::{BootloaderPageAllocator, RuntimePageAllocator, UefiPageAllocator};
 use bootloader::{
-    acpi::AcpiTables,
     elf::{Elf, SectionType},
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
     uefi2,
