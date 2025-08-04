@@ -6,7 +6,8 @@ extern crate alloc;
 use core::panic::PanicInfo;
 
 use alloc::string::ToString;
-use common::{BootInfo, allocation::FixedBufferAllocator};
+use common::{allocation::FixedBufferAllocator, spin::Mutex, BootInfo};
+use kernel::gdt::{self, Gdt};
 
 mod io;
 mod uart;
@@ -50,8 +51,22 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
+static GDT: Mutex<Option<Gdt>> = Mutex::new(None);
+
 #[unsafe(no_mangle)]
 pub fn kernel_main(_bootinfo: &BootInfo) {
+    unsafe {
+        core::arch::asm!(
+            "mov ax, 0",
+            "mov ds, ax",
+            out("ax") _,
+        );
+    }
+    print!("loading gdt...");
+    let gdt = gdt::init();
+    GDT.lock().replace(gdt);
+    GDT.lock();
+    println!(" done");
     todo!();
 }
 
@@ -61,6 +76,9 @@ pub extern "sysv64" fn _start(bootinfo: *const BootInfo) -> ! {
         uart::init();
     }
     println!("> Greetings from the kernel");
+    println!();
+    println!();
+    println!();
     kernel_main(unsafe { bootinfo.as_ref().unwrap() });
 
     loop {}
