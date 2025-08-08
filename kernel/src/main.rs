@@ -6,7 +6,7 @@ extern crate alloc;
 use core::panic::PanicInfo;
 
 use alloc::string::ToString;
-use common::{allocation::FixedBufferAllocator, spin::Mutex, BootInfo};
+use common::{BootInfo, allocation::FixedBufferAllocator, spin::Mutex};
 use kernel::gdt::{self, Gdt};
 
 mod io;
@@ -55,19 +55,11 @@ static GDT: Mutex<Option<Gdt>> = Mutex::new(None);
 
 #[unsafe(no_mangle)]
 pub fn kernel_main(_bootinfo: &BootInfo) {
-    unsafe {
-        core::arch::asm!(
-            "mov ax, 0",
-            "mov ds, ax",
-            out("ax") _,
-        );
-    }
     print!("loading gdt...");
     let gdt = gdt::init();
     GDT.lock().replace(gdt);
     GDT.lock();
     println!(" done");
-    todo!();
 }
 
 #[unsafe(no_mangle)]
@@ -81,5 +73,9 @@ pub extern "sysv64" fn _start(bootinfo: *const BootInfo) -> ! {
     println!();
     kernel_main(unsafe { bootinfo.as_ref().unwrap() });
 
+    println!();
+    println!();
+    println!();
+    println!("KERNEL MAIN EXITED");
     loop {}
 }

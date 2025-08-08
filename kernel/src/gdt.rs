@@ -1,4 +1,4 @@
-use core::{arch::{asm, naked_asm}, ptr};
+use core::{arch::asm, ptr};
 
 use alloc::{boxed::Box, vec};
 
@@ -160,30 +160,17 @@ pub enum Size {
 }
 
 fn reload_segment_registers() {
-    // unsafe {
-    //     asm!(
-    //         "mov ax, {data_seg}",
-    //         "mov ds, ax",
-    //         "mov es, ax",
-    //         "mov fs, ax",
-    //         "mov gs, ax",
-    //         "mov ss, ax",
-    //         data_seg = const 0x10,
-    //     );
-    // }
-    reload_cs();
-    // unsafe {
-    //     asm!(
-    //         "mov ax, {data_seg}",
-    //         "mov ds, ax",
-    //         data_seg = const 0x10,
-    //         out("ax") _,
-    //     );
-    // }
-}
-
-fn reload_cs() {
     unsafe {
+        asm!(
+            "mov ax, {data_seg}",
+            "mov ds, ax",
+            "mov es, ax",
+            "mov fs, ax",
+            "mov gs, ax",
+            "mov ss, ax",
+            data_seg = const 0x10,
+            out("ax") _,
+        );
         asm!(
            "push {code_seg}",
            "lea rax, [rip + 2f]",
@@ -211,22 +198,11 @@ impl Gdt {
     pub fn load(&self) {
         let gdtr = Gdtr::new_for(self);
         unsafe {
-            asm!(
-               "push 0",
-               "lea rax, [rip + 2f]",
-               "push rax",
-               "retfq",
-               "2:",
-               out("rax") _,
-            );
-        }
-        unsafe {
-            asm!("lgdt [{}]", in(reg) &gdtr, options(readonly, preserves_flags, nostack));
+            asm!("lgdt [{}]", in(reg) ptr::from_ref(&gdtr), options(readonly, preserves_flags, nostack));
         }
         // TODO: check that this works as intended
         reload_segment_registers();
     }
-
 }
 
 #[repr(C, packed)]
@@ -237,8 +213,8 @@ struct Gdtr {
 
 impl Gdtr {
     fn new_for(gdt: &Gdt) -> Self {
-        let size = (gdt.0.len() - 1) as u16;
-        let address = ptr::from_ref(gdt) as usize;
+        let size = (gdt.0.len() * size_of::<SegmentDescriptor>() - 1) as u16;
+        let address = gdt.0.as_ptr() as usize;
         Self { size, address }
     }
 }
@@ -311,7 +287,14 @@ pub fn init() -> Gdt {
 
     // todo!("add segment descriptor for tss");
 
-    let entries = vec![SD_NULL, SD_KERNEL_CODE, SD_KERNEL_DATA, SD_USER_CODE, SD_USER_DATA].into_boxed_slice();
+    let entries = vec![
+        SD_NULL,
+        SD_KERNEL_CODE,
+        SD_KERNEL_DATA,
+        SD_USER_CODE,
+        SD_USER_DATA,
+    ]
+    .into_boxed_slice();
     let gdt = Gdt::new(entries);
     gdt.load();
 
