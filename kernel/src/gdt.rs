@@ -1,6 +1,6 @@
 use core::{arch::asm, ptr};
 
-use alloc::{boxed::Box, vec};
+use alloc::boxed::Box;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
@@ -159,26 +159,48 @@ pub enum Size {
     ProtectedMode32 = 1,
 }
 
-fn reload_segment_registers() {
+const _: () = {
+    assert!(size_of::<TaskStateSegment>() == 0x68);
+};
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed(4))]
+pub struct TaskStateSegment {
+    reserved0: u32,
+    rsp0: u64,
+    rsp1: u64,
+    rsp2: u64,
+    reserved1: [u32; 2],
+    ist1: u64,
+    ist2: u64,
+    ist3: u64,
+    ist4: u64,
+    ist5: u64,
+    ist6: u64,
+    ist7: u64,
+    reserved2: [u32; 2],
+    reserved3: u16,
+    iopb: u16,
+}
+
+fn reload_segment_registers(kernel_code_ss: u16, kernel_data_ss: u16) {
     unsafe {
         asm!(
-            "mov ax, {data_seg}",
             "mov ds, ax",
             "mov es, ax",
             "mov fs, ax",
             "mov gs, ax",
             "mov ss, ax",
-            data_seg = const 0x10,
-            out("ax") _,
+            in("ax") kernel_data_ss,
         );
         asm!(
-           "push {code_seg}",
-           "lea rax, [rip + 2f]",
-           "push rax",
-           "retfq",
-           "2:",
-           code_seg = const 0x08,
-           out("rax") _,
+            "push rax",
+            "lea rax, [rip + 2f]",
+            "push rax",
+            "retfq",
+            "2:",
+            in("rax") kernel_code_ss,
+            lateout("rax") _,
         );
     }
 }
@@ -187,21 +209,29 @@ const _: () = {
     assert!(size_of::<[SegmentDescriptor; 4]>() == size_of::<SegmentDescriptor>() * 4);
 };
 
+#[derive(Debug)]
 #[repr(transparent)]
-pub struct Gdt(Box<[SegmentDescriptor]>);
+pub struct Gdt([SegmentDescriptor]);
 
 impl Gdt {
-    pub fn new(table: Box<[SegmentDescriptor]>) -> Self {
-        Self(table)
+    pub fn new(len: usize) -> Box<Self> {
+        let mut arr: Box<[SegmentDescriptor]> = unsafe { Box::new_zeroed_slice(len).assume_init() };
+        let ptr = ptr::from_raw_parts_mut(arr.as_mut_ptr(), len);
+        let gdt = unsafe { Box::from_raw(ptr) };
+
+        gdt
     }
 
-    pub fn load(&self) {
+    pub fn set(&mut self, index: usize, descriptor: SegmentDescriptor) {
+        self.0[index] = descriptor;
+    }
+
+    pub fn load(&self, kernel_code_ss: u16, kernel_data_ss: u16) {
         let gdtr = Gdtr::new_for(self);
         unsafe {
             asm!("lgdt [{}]", in(reg) ptr::from_ref(&gdtr), options(readonly, preserves_flags, nostack));
         }
-        // TODO: check that this works as intended
-        reload_segment_registers();
+        reload_segment_registers(kernel_code_ss, kernel_data_ss);
     }
 }
 
@@ -219,7 +249,7 @@ impl Gdtr {
     }
 }
 
-pub fn init() -> Gdt {
+pub fn init() -> Box<Gdt> {
     const SD_NULL: SegmentDescriptor = SegmentDescriptor::null();
     const SD_KERNEL_CODE: SegmentDescriptor = SegmentDescriptor::new(
         0,
@@ -277,26 +307,16 @@ pub fn init() -> Gdt {
             false,
         ),
     );
-    // static DEFAULT_GDT: [SegmentDescriptor; 5] = [
-    //     SD_NULL,
-    //     SD_KERNEL_CODE,
-    //     SD_KERNEL_DATA,
-    //     SD_USER_CODE,
-    //     SD_USER_DATA,
-    // ];
 
     // todo!("add segment descriptor for tss");
 
-    let entries = vec![
-        SD_NULL,
-        SD_KERNEL_CODE,
-        SD_KERNEL_DATA,
-        SD_USER_CODE,
-        SD_USER_DATA,
-    ]
-    .into_boxed_slice();
-    let gdt = Gdt::new(entries);
-    gdt.load();
+    let mut gdt = Gdt::new(5);
+    gdt.set(0, SD_NULL);
+    gdt.set(1, SD_KERNEL_CODE);
+    gdt.set(2, SD_KERNEL_DATA);
+    gdt.set(3, SD_USER_CODE);
+    gdt.set(4, SD_USER_DATA);
+    gdt.load(0x08, 0x10);
 
     gdt
 }

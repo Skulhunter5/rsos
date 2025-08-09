@@ -5,7 +5,7 @@ extern crate alloc;
 
 use core::panic::PanicInfo;
 
-use alloc::string::ToString;
+use alloc::{boxed::Box, string::ToString};
 use common::{BootInfo, allocation::FixedBufferAllocator, spin::Mutex};
 use kernel::gdt::{self, Gdt};
 
@@ -51,7 +51,7 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
-static GDT: Mutex<Option<Gdt>> = Mutex::new(None);
+static GDT: Mutex<Option<Box<Gdt>>> = Mutex::new(None);
 
 #[unsafe(no_mangle)]
 pub fn kernel_main(_bootinfo: &BootInfo) {
