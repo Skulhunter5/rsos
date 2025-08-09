@@ -183,7 +183,7 @@ pub struct TaskStateSegment {
     iopb: u16,
 }
 
-fn reload_segment_registers(kernel_code_ss: u16, kernel_data_ss: u16) {
+pub fn reload_segment_registers(kernel_code_ss: u16, kernel_data_ss: u16) {
     unsafe {
         asm!(
             "mov ds, ax",

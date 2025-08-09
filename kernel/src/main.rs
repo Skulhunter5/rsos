@@ -60,6 +60,9 @@ pub fn kernel_main(_bootinfo: &BootInfo) {
     GDT.lock().replace(gdt);
     GDT.lock();
     println!(" done");
+
+    // temporary implementation for system shutdown
+    gdt::reload_segment_registers(0, 0);
 }
 
 #[unsafe(no_mangle)]
