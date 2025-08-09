@@ -7,7 +7,7 @@ use core::panic::PanicInfo;
 
 use alloc::{boxed::Box, string::ToString};
 use common::{BootInfo, allocation::FixedBufferAllocator, spin::Mutex};
-use kernel::gdt::{self, Gdt};
+use kernel::gdt::{self, GlobalDescriptorTable, TaskStateSegment};
 
 mod io;
 mod uart;
@@ -51,17 +51,22 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
-static GDT: Mutex<Option<Box<Gdt>>> = Mutex::new(None);
+static GDT: Mutex<Option<Box<GlobalDescriptorTable>>> = Mutex::new(None);
+static TSS: Mutex<Option<Box<TaskStateSegment>>> = Mutex::new(None);
 
 #[unsafe(no_mangle)]
 pub fn kernel_main(_bootinfo: &BootInfo) {
     print!("loading gdt...");
-    let gdt = gdt::init();
+    let (gdt, tss) = gdt::init();
     GDT.lock().replace(gdt);
-    GDT.lock();
+    TSS.lock().replace(tss);
     println!(" done");
 
     // temporary implementation for system shutdown
+    println!();
+    println!();
+    println!();
+    crate::println!(":: KERNEL DONE");
     gdt::reload_segment_registers(0, 0);
 }
 

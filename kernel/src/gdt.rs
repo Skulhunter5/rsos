@@ -25,6 +25,40 @@ impl SegmentDescriptor {
         Self(val)
     }
 
+    pub fn for_tss(tss: &TaskStateSegment) -> (Self, Self) {
+        let present = true;
+        let privilege_level = PrivilegeLevel::Ring0;
+        let ty = DescriptorType::SystemSegment;
+        let ss_ty = 0x9;
+        let access_byte = ((present as u8) << 7)
+            | ((privilege_level as u8) << 5)
+            | ((ty as u8) << 4) | ss_ty;
+        let access = (access_byte as u64) << Self::OFFSET_ACCESS;
+        let flags = (0x0 as u64) << Self::OFFSET_FLAGS;
+        let address = ptr::from_ref(tss) as u64;
+        let entry0 = {
+            // lower half of address in entry0
+            let base = address & 0xFFFFFFFF;
+            let limit = size_of::<TaskStateSegment>() as u64 - 1;
+            let val = (limit & 0xFFFF)
+                | ((base & 0xFFFF) << 16)
+                | ((base & 0xFF0000) << 16)
+                | access
+                | (limit & 0xF0000)
+                | flags
+                | ((base & 0xFF000000) << 32);
+            Self(val)
+        };
+        let entry1 = {
+            // higher half of address in lower half of entry1
+            let base = (address >> 32) & 0xFFFFFFFF;
+            let reserved = 0;
+            let val = (reserved << 32) | base;
+            Self(val)
+        };
+        (entry0, entry1)
+    }
+
     pub const fn zero() -> Self {
         Self(0)
     }
@@ -183,6 +217,28 @@ pub struct TaskStateSegment {
     iopb: u16,
 }
 
+impl TaskStateSegment {
+    pub const fn zero() -> Self {
+        Self {
+            reserved0: 0,
+            rsp0: 0,
+            rsp1: 0,
+            rsp2: 0,
+            reserved1: [0; 2],
+            ist1: 0,
+            ist2: 0,
+            ist3: 0,
+            ist4: 0,
+            ist5: 0,
+            ist6: 0,
+            ist7: 0,
+            reserved2: [0; 2],
+            reserved3: 0,
+            iopb: 0,
+        }
+    }
+}
+
 pub fn reload_segment_registers(kernel_code_ss: u16, kernel_data_ss: u16) {
     unsafe {
         asm!(
@@ -211,9 +267,9 @@ const _: () = {
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct Gdt([SegmentDescriptor]);
+pub struct GlobalDescriptorTable([SegmentDescriptor]);
 
-impl Gdt {
+impl GlobalDescriptorTable {
     pub fn new(len: usize) -> Box<Self> {
         let mut arr: Box<[SegmentDescriptor]> = unsafe { Box::new_zeroed_slice(len).assume_init() };
         let ptr = ptr::from_raw_parts_mut(arr.as_mut_ptr(), len);
@@ -242,14 +298,14 @@ struct Gdtr {
 }
 
 impl Gdtr {
-    fn new_for(gdt: &Gdt) -> Self {
+    fn new_for(gdt: &GlobalDescriptorTable) -> Self {
         let size = (gdt.0.len() * size_of::<SegmentDescriptor>() - 1) as u16;
         let address = gdt.0.as_ptr() as usize;
         Self { size, address }
     }
 }
 
-pub fn init() -> Box<Gdt> {
+pub fn init() -> (Box<GlobalDescriptorTable>, Box<TaskStateSegment>) {
     const SD_NULL: SegmentDescriptor = SegmentDescriptor::null();
     const SD_KERNEL_CODE: SegmentDescriptor = SegmentDescriptor::new(
         0,
@@ -310,13 +366,18 @@ pub fn init() -> Box<Gdt> {
 
     // todo!("add segment descriptor for tss");
 
-    let mut gdt = Gdt::new(5);
+    let tss = Box::new(TaskStateSegment::zero());
+
+    let mut gdt = GlobalDescriptorTable::new(7);
     gdt.set(0, SD_NULL);
     gdt.set(1, SD_KERNEL_CODE);
     gdt.set(2, SD_KERNEL_DATA);
     gdt.set(3, SD_USER_CODE);
     gdt.set(4, SD_USER_DATA);
+    let (tss_entry0, tss_entry1) = SegmentDescriptor::for_tss(tss.as_ref());
+    gdt.set(5, tss_entry0);
+    gdt.set(6, tss_entry1);
     gdt.load(0x08, 0x10);
 
-    gdt
+    (gdt, tss)
 }
