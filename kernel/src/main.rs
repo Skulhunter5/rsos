@@ -7,10 +7,12 @@ use core::panic::PanicInfo;
 
 use alloc::{boxed::Box, string::ToString};
 use common::{BootInfo, allocation::FixedBufferAllocator, spin::Mutex};
-use kernel::gdt::{self, GlobalDescriptorTable, TaskStateSegment};
+use kernel::{
+    gdt::{self, GlobalDescriptorTable, TaskStateSegment},
+    uart,
+};
 
-mod io;
-mod uart;
+mod interrupts;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {

@@ -30,9 +30,8 @@ impl SegmentDescriptor {
         let privilege_level = PrivilegeLevel::Ring0;
         let ty = DescriptorType::SystemSegment;
         let ss_ty = 0x9;
-        let access_byte = ((present as u8) << 7)
-            | ((privilege_level as u8) << 5)
-            | ((ty as u8) << 4) | ss_ty;
+        let access_byte =
+            ((present as u8) << 7) | ((privilege_level as u8) << 5) | ((ty as u8) << 4) | ss_ty;
         let access = (access_byte as u64) << Self::OFFSET_ACCESS;
         let flags = (0x0 as u64) << Self::OFFSET_FLAGS;
         let address = ptr::from_ref(tss) as u64;
@@ -201,20 +200,20 @@ const _: () = {
 #[repr(C, packed(4))]
 pub struct TaskStateSegment {
     reserved0: u32,
-    rsp0: u64,
-    rsp1: u64,
-    rsp2: u64,
+    pub rsp0: u64,
+    pub rsp1: u64,
+    pub rsp2: u64,
     reserved1: [u32; 2],
-    ist1: u64,
-    ist2: u64,
-    ist3: u64,
-    ist4: u64,
-    ist5: u64,
-    ist6: u64,
-    ist7: u64,
+    pub ist1: u64,
+    pub ist2: u64,
+    pub ist3: u64,
+    pub ist4: u64,
+    pub ist5: u64,
+    pub ist6: u64,
+    pub ist7: u64,
     reserved2: [u32; 2],
     reserved3: u16,
-    iopb: u16,
+    pub iopb: u16,
 }
 
 impl TaskStateSegment {
