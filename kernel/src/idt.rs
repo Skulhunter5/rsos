@@ -57,10 +57,14 @@ impl InterruptDescriptorTable {
     pub fn load(&self) {
         let idtr = Idtr::new_for(self);
         unsafe {
+            // asm!(
+            //     "cli",
+            //     "lidt [{}]",
+            //     "sti",
+            //     in(reg) ptr::from_ref(&idtr) as usize
+            // );
             asm!(
-                "cli",
                 "lidt [{}]",
-                "sti",
                 in(reg) ptr::from_ref(&idtr) as usize
             );
         }

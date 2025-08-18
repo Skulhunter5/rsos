@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(abi_x86_interrupt)]
 
 extern crate alloc;
 
@@ -8,8 +9,7 @@ use core::panic::PanicInfo;
 use alloc::{boxed::Box, string::ToString};
 use common::{BootInfo, allocation::FixedBufferAllocator, spin::Mutex};
 use kernel::{
-    gdt::{self, GlobalDescriptorTable, TaskStateSegment},
-    uart,
+    gdt::{self, GlobalDescriptorTable, TaskStateSegment}, idt::InterruptDescriptorTable, uart
 };
 
 mod interrupts;
@@ -55,6 +55,7 @@ macro_rules! println {
 
 static GDT: Mutex<Option<Box<GlobalDescriptorTable>>> = Mutex::new(None);
 static TSS: Mutex<Option<Box<TaskStateSegment>>> = Mutex::new(None);
+static IDT: Mutex<Option<Box<InterruptDescriptorTable>>> = Mutex::new(None);
 
 #[unsafe(no_mangle)]
 pub fn kernel_main(_bootinfo: &BootInfo) {
@@ -63,6 +64,16 @@ pub fn kernel_main(_bootinfo: &BootInfo) {
     GDT.lock().replace(gdt);
     TSS.lock().replace(tss);
     println!(" done");
+
+    print!("setting up interrupts...");
+    let idt = interrupts::init();
+    IDT.lock().replace(idt);
+    // unsafe { core::arch::asm!("mov cr3, rax", in("rax") 0); }
+    println!(" done");
+
+    // for i in 0..10000000 {
+    //     core::hint::black_box(i);
+    // }
 
     // temporary implementation for system shutdown
     println!();
