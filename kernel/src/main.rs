@@ -9,7 +9,9 @@ use core::panic::PanicInfo;
 use alloc::{boxed::Box, string::ToString};
 use common::{BootInfo, allocation::FixedBufferAllocator, spin::Mutex};
 use kernel::{
-    gdt::{self, GlobalDescriptorTable, TaskStateSegment}, idt::InterruptDescriptorTable, uart
+    gdt::{self, GlobalDescriptorTable, TaskStateSegment},
+    idt::InterruptDescriptorTable,
+    uart,
 };
 
 mod interrupts;
@@ -70,6 +72,16 @@ pub fn kernel_main(_bootinfo: &BootInfo) {
     IDT.lock().replace(idt);
     // unsafe { core::arch::asm!("mov cr3, rax", in("rax") 0); }
     println!(" done");
+
+    println!("trying to cause interrupt...");
+    unsafe {
+        core::arch::asm!(
+            "xor rcx, rcx",
+            "div rcx",
+            out("rcx") _,
+        );
+    }
+    println!("-> failed");
 
     // for i in 0..10000000 {
     //     core::hint::black_box(i);
