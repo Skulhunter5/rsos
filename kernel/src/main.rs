@@ -13,8 +13,15 @@ use kernel::{
     idt::InterruptDescriptorTable,
     uart,
 };
+use memory::PhysicalMemoryManager;
 
+mod memory;
 mod interrupts;
+
+// temporary implementation for system shutdown
+fn crash_system() {
+    gdt::reload_segment_registers(0, 0);
+}
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -33,7 +40,7 @@ fn panic(info: &PanicInfo) -> ! {
             }
         }
     }
-
+    
     // End the panic handler in an infinite loop to halt the system
     loop {}
 }
@@ -60,7 +67,11 @@ static TSS: Mutex<Option<Box<TaskStateSegment>>> = Mutex::new(None);
 static IDT: Mutex<Option<Box<InterruptDescriptorTable>>> = Mutex::new(None);
 
 #[unsafe(no_mangle)]
-pub fn kernel_main(_bootinfo: &BootInfo) {
+pub fn kernel_main(bootinfo: &BootInfo) {
+    print!("setting up frame allocator...");
+    let _pmm = PhysicalMemoryManager::init(&bootinfo.available_mem);
+    println!(" done");
+
     print!("loading gdt...");
     let (gdt, tss) = gdt::init();
     GDT.lock().replace(gdt);
@@ -87,12 +98,11 @@ pub fn kernel_main(_bootinfo: &BootInfo) {
     //     core::hint::black_box(i);
     // }
 
-    // temporary implementation for system shutdown
     println!();
     println!();
     println!();
     crate::println!(":: KERNEL DONE");
-    gdt::reload_segment_registers(0, 0);
+    crash_system();
 }
 
 #[unsafe(no_mangle)]

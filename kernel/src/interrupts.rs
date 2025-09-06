@@ -1,8 +1,6 @@
 use alloc::boxed::Box;
 use kernel::idt::{IdtEntry, InterruptDescriptorTable};
 
-static MSG_DE: &str = "EXCEPTION #DE\0";
-
 type VirtualAddress = u64;
 type SegmentSelector = u16;
 type RFlags = u64;

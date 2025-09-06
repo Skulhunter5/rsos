@@ -27,7 +27,7 @@ run: vdisk
 		-m 2G \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF) \
 		-drive format=raw,file=$(DISK_IMG),media=disk \
-		-no-reboot -d int,cpu_reset \
+		-no-reboot \
 		-serial stdio
 
 setup:

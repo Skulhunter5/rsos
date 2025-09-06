@@ -22,12 +22,11 @@ use bootloader::{
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
     uefi2,
 };
-use common::{BootInfo, allocation::FixedBufferAllocator};
+use common::{allocation::FixedBufferAllocator, BootInfo, PhysicalAddress, VirtualAddress};
 use disk::{Disk, PartitionDevice, StorageDevice};
 use fat::FatFs;
 use paging::{
-    PageDirectory, PageDirectoryPointer, PageEntry, PageMapLevel4, PageTable, PhysicalAddress,
-    read_cr3, write_cr3,
+    PageDirectory, PageDirectoryPointer, PageEntry, PageMapLevel4, PageTable, read_cr3, write_cr3,
 };
 use uefi::{
     SystemTable,
@@ -349,7 +348,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
 
     {
         print!("mapping sections to higher half...");
-        let phys_to_virt = |paddr: paging::PhysicalAddress| paging::VirtualAddress(paddr.0);
+        let phys_to_virt = |paddr: PhysicalAddress| VirtualAddress(paddr.0);
         let mut entry_template = PageEntry::empty();
         entry_template.set_present(true);
         entry_template.set_writable(true);
@@ -437,7 +436,12 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
     // println!("\n\nDONE -> LOOPING...");
     // loop {}
 
-    let bootinfo = BootInfo;
+    let bootinfo = BootInfo {
+        available_mem: free_memory
+            .iter()
+            .map(|range| PhysicalAddress(range.0)..PhysicalAddress(range.1))
+            .collect::<Vec<_>>(),
+    };
 
     let kernel_entry_ptr = kernel_entry_point as *const ();
     let kernel_entry: extern "sysv64" fn(bootinfo: *const BootInfo) -> ! =
