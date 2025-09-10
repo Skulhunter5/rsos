@@ -1,6 +1,6 @@
 use core::{marker::PhantomData, mem::MaybeUninit};
 
-use common::{allocation::PageAllocator, PhysicalAddress, VirtualAddress};
+use common::{PhysicalAddress, VirtualAddress, allocation::PageAllocator};
 
 // TODO: fix address mask to include "execute disable" bit etc.
 #[derive(Clone, Copy)]
@@ -13,11 +13,11 @@ impl PageEntry {
     }
 
     pub fn address(&self) -> PhysicalAddress {
-        PhysicalAddress(self.0 & !0xFFF)
+        PhysicalAddress::from(self.0 & !0xFFF)
     }
 
     pub fn set_address(&mut self, address: PhysicalAddress) {
-        self.0 = (self.0 & 0xFFF) | (address.0 & !0xFFF);
+        self.0 = (self.0 & 0xFFF) | (address.0 as u64 & !0xFFF);
     }
 
     pub fn present(&self) -> bool {
@@ -257,15 +257,15 @@ pub struct Cr3Value(u64);
 
 impl Cr3Value {
     pub fn new(pml4_address: PhysicalAddress) -> Self {
-        Self(pml4_address.0 & !0xFFF)
+        Self(pml4_address.0 as u64 & !0xFFF)
     }
 
     pub fn pml4_address(&self) -> PhysicalAddress {
-        PhysicalAddress(self.0 & !0xFFF)
+        PhysicalAddress::from(self.0 & !0xFFF)
     }
 
     pub fn set_pml4_address(&mut self, pml4_address: PhysicalAddress) {
-        self.0 = (self.0 & 0xFFF) | (pml4_address.0 & !0xFFF);
+        self.0 = (self.0 & 0xFFF) | (pml4_address.0 as u64 & !0xFFF);
     }
 }
 

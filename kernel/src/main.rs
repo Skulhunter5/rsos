@@ -15,8 +15,8 @@ use kernel::{
 };
 use memory::PhysicalMemoryManager;
 
-mod memory;
 mod interrupts;
+mod memory;
 
 // temporary implementation for system shutdown
 fn crash_system() {
@@ -40,7 +40,7 @@ fn panic(info: &PanicInfo) -> ! {
             }
         }
     }
-    
+
     // End the panic handler in an infinite loop to halt the system
     loop {}
 }
@@ -68,9 +68,14 @@ static IDT: Mutex<Option<Box<InterruptDescriptorTable>>> = Mutex::new(None);
 
 #[unsafe(no_mangle)]
 pub fn kernel_main(bootinfo: &BootInfo) {
-    print!("setting up frame allocator...");
-    let _pmm = PhysicalMemoryManager::init(&bootinfo.available_mem);
-    println!(" done");
+    println!("setting up frame allocator...");
+    let mut pmm = PhysicalMemoryManager::init(&bootinfo.available_mem).expect("failed to initialize PhysicalMemoryManager");
+    println!("-> done");
+    println!("allocating frame...");
+    let frame = pmm.alloc_page().expect("failed to allocate frame from PhysicalMemoryManager");
+    println!("- frame: 0x{:x}", frame.0);
+    pmm.free_page(frame);
+    println!("-> done");
 
     print!("loading gdt...");
     let (gdt, tss) = gdt::init();

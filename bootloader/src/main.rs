@@ -22,7 +22,7 @@ use bootloader::{
     pci::{self, DeviceType, MassStorageControllerType, SataControllerInterface},
     uefi2,
 };
-use common::{allocation::FixedBufferAllocator, BootInfo, PhysicalAddress, VirtualAddress};
+use common::{BootInfo, PhysicalAddress, VirtualAddress, allocation::FixedBufferAllocator};
 use disk::{Disk, PartitionDevice, StorageDevice};
 use fat::FatFs;
 use paging::{
@@ -315,14 +315,14 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
     {
         print!("creating new paging structures...");
         let pml4 = PageMapLevel4::new_in(&PAGE_ALLOCATOR);
-        let pml4_address = PhysicalAddress(ptr::from_ref(pml4) as u64);
+        let pml4_address = PhysicalAddress::from(ptr::from_ref(pml4) as usize);
         let mut entry_template = PageEntry::empty();
         entry_template.set_present(true);
         entry_template.set_writable(true);
         entry_template.set_cacheable(true);
         for i in 0..2 {
             let pdp = PageDirectoryPointer::new_in(&PAGE_ALLOCATOR);
-            let pdp_address = PhysicalAddress(ptr::from_ref(pdp) as u64);
+            let pdp_address = PhysicalAddress::from(ptr::from_ref(pdp) as usize);
 
             let mut pe = entry_template.clone();
             pe.set_address(pdp_address);
@@ -348,7 +348,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
 
     {
         print!("mapping sections to higher half...");
-        let phys_to_virt = |paddr: PhysicalAddress| VirtualAddress(paddr.0);
+        let phys_to_virt = |paddr: PhysicalAddress| VirtualAddress::from(paddr.0);
         let mut entry_template = PageEntry::empty();
         entry_template.set_present(true);
         entry_template.set_writable(true);
@@ -374,7 +374,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                     pml4.next_level(pml4_index, phys_to_virt)
                 } else {
                     let pdp = PageDirectoryPointer::new_in(&PAGE_ALLOCATOR);
-                    let pdp_address = PhysicalAddress(ptr::from_ref(pdp) as u64);
+                    let pdp_address = PhysicalAddress::from(ptr::from_ref(pdp) as usize);
                     let mut pml4_entry = entry_template.clone();
                     pml4_entry.set_address(pdp_address);
                     pml4.set(pml4_index, pml4_entry);
@@ -388,7 +388,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                     pdp.next_level(pdp_index, phys_to_virt)
                 } else {
                     let pd = PageDirectory::new_in(&PAGE_ALLOCATOR);
-                    let pd_address = PhysicalAddress(ptr::from_ref(pd) as u64);
+                    let pd_address = PhysicalAddress::from(ptr::from_ref(pd) as usize);
                     let mut pdp_entry = entry_template.clone();
                     pdp_entry.set_address(pd_address);
                     pdp.set(pdp_index, pdp_entry);
@@ -402,7 +402,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                     pd.next_level(pd_index, phys_to_virt)
                 } else {
                     let pt = PageTable::new_in(&PAGE_ALLOCATOR);
-                    let pt_address = PhysicalAddress(ptr::from_ref(pt) as u64);
+                    let pt_address = PhysicalAddress::from(ptr::from_ref(pt) as usize);
                     let mut pd_entry = entry_template.clone();
                     pd_entry.set_address(pt_address);
                     pd.set(pd_index, pd_entry);
@@ -418,7 +418,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
                     );
                 } else {
                     let mut pt_entry = entry_template.clone();
-                    pt_entry.set_address(PhysicalAddress(paddr as u64));
+                    pt_entry.set_address(PhysicalAddress::from(paddr));
                     pt.set(pt_index, pt_entry);
                 }
             }
@@ -439,7 +439,7 @@ pub extern "efiapi" fn efi_main(handle: ImageHandle, system_table: *mut raw::tab
     let bootinfo = BootInfo {
         available_mem: free_memory
             .iter()
-            .map(|range| PhysicalAddress(range.0)..PhysicalAddress(range.1))
+            .map(|range| PhysicalAddress::from(range.0)..PhysicalAddress::from(range.1))
             .collect::<Vec<_>>(),
     };
 
