@@ -20,3 +20,4 @@ mod bootinfo;
 pub mod spin;
 pub use addresses::{PAddr, PhysAddr, PhysicalAddress, VAddr, VirtAddr, VirtualAddress};
 pub use bootinfo::BootInfo;
+pub mod paging;

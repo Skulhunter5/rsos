@@ -15,8 +15,11 @@ use kernel::{
 };
 use memory::PhysicalMemoryManager;
 
+use crate::vmm::VirtualMemoryManager;
+
 mod interrupts;
 mod memory;
+mod vmm;
 
 // temporary implementation for system shutdown
 fn crash_system() {
@@ -76,6 +79,8 @@ pub fn kernel_main(bootinfo: &BootInfo) {
     println!("- frame: 0x{:x}", frame.0);
     pmm.free_page(frame);
     println!("-> done");
+
+    let _vmm = VirtualMemoryManager::init();
 
     print!("loading gdt...");
     let (gdt, tss) = gdt::init();
