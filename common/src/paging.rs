@@ -17,14 +17,22 @@ impl PageMap {
         Self { pml4 }
     }
 
-    pub fn map(&mut self, vaddr: VirtualAddress, paddr: PhysicalAddress) -> Option<PhysicalAddress> {
-        PageMapLevel4::get_index(vaddr)
-        self.pml4.set(index, entry)
+    pub fn map(&mut self, vaddr: VirtualAddress, paddr: PhysicalAddress) -> PhysicalAddress {
+        // let mut entry = PageEntry::empty();
+        // entry.set_address(paddr);
+        // let old_entry = self.pml4.set(PageMapLevel4::get_index(vaddr), entry);
+        // return old_entry.address();
+
+        if !self.pml4.is_present(PageMapLevel4::get_index(vaddr)) {
+            let new_pdpt: PageDirectoryPointerTable
+        }
+
+        todo!();
     }
 }
 
 pub type PageMapLevel4 = PageMapLevel<4, PageDirectoryPointer>;
-pub type PageDirectoryPointer = PageMapLevel<3, PageDirectory>;
+pub type PageDirectoryPointerTable = PageMapLevel<3, PageDirectory>;
 pub type PageDirectory = PageMapLevel<2, PageTable>;
 pub type PageTable = PageMapLevel<1, u8>;
 
@@ -104,8 +112,8 @@ impl<const N: usize, T> PageMapLevel<N, T> {
     }
 
     pub fn get_index(vaddr: VirtualAddress) -> usize {
-        // TODO: get the correct index into the table for the given vaddr, according to the level
-        todo!();
+        const INDEX_MASK: usize = 0b1_1111_1111;
+        vaddr.0 >> (INDEX_MASK.count_ones() as usize * N) & INDEX_MASK
     }
 }
 
