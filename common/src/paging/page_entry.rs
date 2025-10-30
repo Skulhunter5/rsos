@@ -6,8 +6,15 @@ use crate::PhysicalAddress;
 pub struct PageEntry<const LEVEL: usize>(u64);
 
 impl<const LEVEL: usize> PageEntry<LEVEL> {
-    pub fn empty() -> Self {
+    pub fn new_empty() -> Self {
         Self(0)
+    }
+
+    pub fn new_present(paddr: PhysicalAddress) -> Self {
+        let mut s = Self::new_empty();
+        s.set_present(true);
+        s.set_address(paddr);
+        return s;
     }
 
     pub fn address(&self) -> PhysicalAddress {

@@ -23,15 +23,19 @@ impl PageMap {
         // let old_entry = self.pml4.set(PageMapLevel4::get_index(vaddr), entry);
         // return old_entry.address();
 
-        if !self.pml4.is_present(PageMapLevel4::get_index(vaddr)) {
-            let new_pdpt: PageDirectoryPointerTable
+        let pml4_index = PageMapLevel4::get_index(vaddr);
+        if !self.pml4.is_present(pml4_index) {
+            let new_pdpt: *mut PageDirectoryPointerTable = Box::into_raw(unsafe { Box::new_zeroed().assume_init() });
+            let entry = PageEntry::new_present(PhysicalAddress(new_pdpt as usize));
+            self.pml4.set(pml4_index, entry);
         }
+        let pdpt = self.pml4.entries[pml4_index].address();
 
         todo!();
     }
 }
 
-pub type PageMapLevel4 = PageMapLevel<4, PageDirectoryPointer>;
+pub type PageMapLevel4 = PageMapLevel<4, PageDirectoryPointerTable>;
 pub type PageDirectoryPointerTable = PageMapLevel<3, PageDirectory>;
 pub type PageDirectory = PageMapLevel<2, PageTable>;
 pub type PageTable = PageMapLevel<1, u8>;

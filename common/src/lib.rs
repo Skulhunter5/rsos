@@ -4,6 +4,7 @@
 #![feature(ptr_mask)]
 #![feature(pointer_is_aligned_to)]
 #![feature(slice_ptr_get)]
+#![feature(new_zeroed_alloc)]
 
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("unsupported target pointer width");
