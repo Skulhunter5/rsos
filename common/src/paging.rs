@@ -55,7 +55,7 @@ const _: () = {
 impl<const N: usize, T> PageMapLevel<N, T> {
     pub fn empty() -> Self {
         Self {
-            entries: [PageEntry::empty(); 512],
+            entries: [PageEntry::new_empty(); 512],
             _marker: PhantomData,
         }
     }
