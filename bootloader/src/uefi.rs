@@ -32,7 +32,7 @@ impl SystemTable {
         }
     }
 
-    pub fn stdout(&self) -> Option<text::Output> {
+    pub fn stdout(&self) -> Option<text::Output<'_>> {
         let proto = unsafe {
             self.table
                 .con_out
@@ -43,7 +43,7 @@ impl SystemTable {
         Some(text::Output::new(self.table.into(), proto))
     }
 
-    pub fn stderr(&self) -> Option<text::Output> {
+    pub fn stderr(&self) -> Option<text::Output<'_>> {
         let proto = unsafe {
             self.table
                 .std_err
@@ -65,7 +65,7 @@ impl SystemTable {
         }
     }
 
-    pub fn boot_services(&self) -> Option<BootServices> {
+    pub fn boot_services(&self) -> Option<BootServices<'_>> {
         if self
             .boot_services_lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)

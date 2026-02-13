@@ -103,11 +103,11 @@ impl AhciController {
         }
     }
 
-    pub fn generic_host_control(&mut self) -> GenericHostControl {
+    pub fn generic_host_control(&mut self) -> GenericHostControl<'_> {
         GenericHostControl::new(self)
     }
 
-    unsafe fn port_registers(&mut self, port: usize) -> PortRegisters {
+    unsafe fn port_registers(&mut self, port: usize) -> PortRegisters<'_> {
         PortRegisters::new(self, port)
     }
 }
@@ -145,7 +145,7 @@ impl<'a> GenericHostControl<'a> {
         return ImplementedPorts(unsafe { ptr.read_volatile() });
     }
 
-    pub fn global_hba_control(&mut self) -> GlobalHbaControl {
+    pub fn global_hba_control(&mut self) -> GlobalHbaControl<'_> {
         GlobalHbaControl::new(self)
     }
 }
@@ -435,7 +435,7 @@ impl Port {
         }
     }
 
-    fn registers(&mut self) -> PortRegisters {
+    fn registers(&mut self) -> PortRegisters<'_> {
         PortRegisters {
             base_ptr: self.base_ptr,
             _marker: PhantomData,
@@ -947,7 +947,7 @@ impl PortRegisters<'_> {
         }
     }
 
-    pub fn cmd(&mut self) -> PortCmd {
+    pub fn cmd(&mut self) -> PortCmd<'_> {
         PortCmd::new(self)
     }
 }

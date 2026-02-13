@@ -23,7 +23,7 @@ impl ConfigurationTable<'_> {
         self.count
     }
 
-    pub fn iter(&self) -> ConfigurationTableIterator {
+    pub fn iter(&self) -> ConfigurationTableIterator<'_> {
         ConfigurationTableIterator {
             table: self,
             index: 0,
