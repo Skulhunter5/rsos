@@ -1,20 +1,70 @@
 use crate::PhysicalAddress;
 
+const PAGE_SIZE: usize = 4096;
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct PageHandle(PhysicalAddress);
+
+impl PageHandle {
+    pub unsafe fn create(addr: PhysicalAddress) -> Self {
+        assert!(addr.0 % PAGE_SIZE == 0);
+        Self(addr)
+    }
+
+    pub fn address(&self) -> PhysicalAddress {
+        self.0
+    }
+
+    pub fn as_bytes(&self) -> &[u8; PAGE_SIZE] {
+        todo!();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PageOptions(u64);
+
+impl PageOptions {
+    const MASK: u64 = todo!();
+}
+
+impl Default for PageOptions {
+    fn default() -> Self {
+        Self(0)
+    }
+}
+
 // TODO: fix address mask to include "execute disable" bit etc.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct PageEntry<const LEVEL: usize>(u64);
 
 impl<const LEVEL: usize> PageEntry<LEVEL> {
-    pub fn new_empty() -> Self {
-        Self(0)
+    pub const EMPTY: Self = Self(0);
+
+    const ADDRESS_MASK: u64 = todo!();
+
+    pub fn new(page: PageHandle, options: PageOptions) -> Self {
+        // SAFETY: Ownership of the page is guaranteed by PageHandle
+        unsafe { Self::new_present(page.address(), options) }
     }
 
-    pub fn new_present(paddr: PhysicalAddress) -> Self {
-        let mut s = Self::new_empty();
+    fn new_with_options(options: PageOptions) -> Self {
+        Self(options.0)
+    }
+
+    pub unsafe fn new_present(paddr: PhysicalAddress, options: PageOptions) -> Self {
+        let mut s = Self::new_with_options(options);
         s.set_present(true);
         s.set_address(paddr);
         return s;
+    }
+
+    pub fn options(self) -> PageOptions {
+        PageOptions(self.0 & PageOptions::MASK)
+    }
+
+    pub fn with_options(self, options: PageOptions) -> Self {
+        Self(self.0 & Self::ADDRESS_MASK | options.0)
     }
 
     pub fn address(&self) -> PhysicalAddress {

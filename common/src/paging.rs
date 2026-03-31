@@ -6,15 +6,17 @@ use crate::{allocation::PageAllocator, paging::page_entry::PageEntry, PhysicalAd
 
 mod page_entry;
 
-pub struct PageMap {
-    pml4: Box<PageMapLevel4>
+pub struct PageMap<A: PageAllocator> {
+    pml4: *mut PageMapLevel4,
+    page_allocator: A,
 }
 
-impl PageMap {
-    pub fn new() -> Self {
-        let pml4 = Box::new_uninit();
-        let pml4 = unsafe { pml4.assume_init() };
-        Self { pml4 }
+impl<A: PageAllocator> PageMap<A> {
+    pub fn new(page_allocator: A) -> Self {
+        let pml4 = PageMapLevel4::new_in(&page_allocator);
+        // let pml4 = Box::new_uninit();
+        // let pml4 = unsafe { pml4.assume_init() };
+        Self { pml4, page_allocator }
     }
 
     pub fn map(&mut self, vaddr: VirtualAddress, paddr: PhysicalAddress) -> PhysicalAddress {
@@ -24,14 +26,82 @@ impl PageMap {
         // return old_entry.address();
 
         let pml4_index = PageMapLevel4::get_index(vaddr);
-        if !self.pml4.is_present(pml4_index) {
+        // if !self.pml4.is_present(pml4_index) {
+        //     let new_pdpt: *mut PageDirectoryPointerTable = Box::into_raw(unsafe { Box::new_zeroed().assume_init() });
+        //     let entry = PageEntry::new_present(PhysicalAddress(new_pdpt as usize));
+        //     self.pml4.set(pml4_index, entry);
+        // }
+        // let pdpt = self.pml4.entries[pml4_index].address();
+
+        let entry = self.pml4.get_mut(pml4_index);
+        if !entry.present() {
+            let new_pdpt = PageDirectoryPointerTable::new_in(&self.page_allocator);
             let new_pdpt: *mut PageDirectoryPointerTable = Box::into_raw(unsafe { Box::new_zeroed().assume_init() });
             let entry = PageEntry::new_present(PhysicalAddress(new_pdpt as usize));
             self.pml4.set(pml4_index, entry);
         }
-        let pdpt = self.pml4.entries[pml4_index].address();
+
+
+        // let pml4 = unsafe { PageMapLevel4::get_current() };
+        // let pml4_index = (vaddr >> 39) & 0x1FF;
+        //
+        // let pdp = if pml4.is_present(pml4_index) {
+        //     pml4.next_level(pml4_index, phys_to_virt)
+        // } else {
+        //     let pdp = PageDirectoryPointer::new_in(&PAGE_ALLOCATOR);
+        //     let pdp_address = PhysicalAddress::from(ptr::from_ref(pdp) as usize);
+        //     let mut pml4_entry = entry_template.clone();
+        //     pml4_entry.set_address(pdp_address);
+        //     pml4.set(pml4_index, pml4_entry);
+        //
+        //     pdp
+        // };
+        // let pdp_index = (vaddr >> 30) & 0x1FF;
+        //
+        // let pd = if pdp.is_present(pdp_index) {
+        //     pdp.next_level(pdp_index, phys_to_virt)
+        // } else {
+        //     let pd = PageDirectory::new_in(&PAGE_ALLOCATOR);
+        //     let pd_address = PhysicalAddress::from(ptr::from_ref(pd) as usize);
+        //     let mut pdp_entry = entry_template.clone();
+        //     pdp_entry.set_address(pd_address);
+        //     pdp.set(pdp_index, pdp_entry);
+        //
+        //     pd
+        // };
+        // let pd_index = (vaddr >> 21) & 0x1FF;
+        //
+        // let pt = if pd.is_present(pd_index) {
+        //     pd.next_level(pd_index, phys_to_virt)
+        // } else {
+        //     let pt = PageTable::new_in(&PAGE_ALLOCATOR);
+        //     let pt_address = PhysicalAddress::from(ptr::from_ref(pt) as usize);
+        //     let mut pd_entry = entry_template.clone();
+        //     pd_entry.set_address(pt_address);
+        //     pd.set(pd_index, pd_entry);
+        //
+        //     pt
+        // };
+        // let pt_index = (vaddr >> 12) & 0x1FF;
+        //
+        // if pt.is_present(pt_index) {
+        //     panic!(
+        //         "Trying to map an already present page while mapping higher-half kernel"
+        //     );
+        // } else {
+        //     let mut pt_entry = entry_template.clone();
+        //     pt_entry.set_address(PhysicalAddress::from(paddr));
+        //     pt.set(pt_index, pt_entry);
+        // }
 
         todo!();
+    }
+}
+
+impl<A: PageAllocator> Drop for PageMap<A> {
+    fn drop(&mut self) {
+        drop(self.pml4);
+        self.page_allocator.dealloc(self.pml4.cast::<u8>(), 1);
     }
 }
 
@@ -55,7 +125,7 @@ const _: () = {
 impl<const N: usize, T> PageMapLevel<N, T> {
     pub fn empty() -> Self {
         Self {
-            entries: [PageEntry::new_empty(); 512],
+            entries: [PageEntry::EMPTY; 512],
             _marker: PhantomData,
         }
     }
@@ -130,7 +200,7 @@ impl<const N: usize, T> core::ops::Index<usize> for PageMapLevel<N, T> {
 }
 
 impl<const N: usize, T> core::ops::IndexMut<usize> for PageMapLevel<N, T> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+    fn index_mut(&mut self, index: usize) -> &mut Shat's Changedelf::Output {
         &mut self.entries[index]
     }
 }
