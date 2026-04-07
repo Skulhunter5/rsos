@@ -17,6 +17,10 @@ macro_rules! address_impl(
             pub fn is_null(&self) -> bool {
                 self.0 == 0
             }
+
+            pub fn is_aligned_to(&self, align: usize) -> bool {
+                (self.0 as *mut ()).is_aligned_to(align)
+            }
         }
 
         impl core::fmt::Debug for $name {

@@ -2,29 +2,11 @@ use crate::PhysicalAddress;
 
 const PAGE_SIZE: usize = 4096;
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct PageHandle(PhysicalAddress);
-
-impl PageHandle {
-    pub unsafe fn create(addr: PhysicalAddress) -> Self {
-        assert!(addr.0 % PAGE_SIZE == 0);
-        Self(addr)
-    }
-
-    pub fn address(&self) -> PhysicalAddress {
-        self.0
-    }
-
-    pub fn as_bytes(&self) -> &[u8; PAGE_SIZE] {
-        todo!();
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageOptions(u64);
 
 impl PageOptions {
-    const MASK: u64 = todo!();
+    const MASK: u64 = 0b11_1111 | (1 << 63);
 }
 
 impl Default for PageOptions {
@@ -36,17 +18,22 @@ impl Default for PageOptions {
 // TODO: fix address mask to include "execute disable" bit etc.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct PageEntry<const LEVEL: usize>(u64);
+pub struct PageEntry(u64);
 
-impl<const LEVEL: usize> PageEntry<LEVEL> {
+impl PageEntry {
     pub const EMPTY: Self = Self(0);
 
-    const ADDRESS_MASK: u64 = todo!();
-
-    pub fn new(page: PageHandle, options: PageOptions) -> Self {
-        // SAFETY: Ownership of the page is guaranteed by PageHandle
-        unsafe { Self::new_present(page.address(), options) }
-    }
+    const MAXIMUM_PHYSICAL_ADDRESS_BIT: usize = 52;
+    const BIT_PRESENT: u64 = 1;
+    const BIT_READ_WRITE: u64 = 1 << 1;
+    const BIT_USER_SUPERVISOR: u64 = 1 << 2;
+    const BIT_WRITE_THROUGH: u64 = 1 << 3;
+    const BIT_CACHE_DISABLE: u64 = 1 << 4;
+    const BIT_ACCESSED: u64 = 1 << 5;
+    const BIT_DIRTY: u64 = 1 << 6;
+    const BIT_PAGE_SIZE: u64 = 1 << 7;
+    const ADDRESS_MASK: u64 = ((1 << Self::MAXIMUM_PHYSICAL_ADDRESS_BIT) - 1) & !0xFFF;
+    const OPTIONS_MASK: u64 = PageOptions::MASK;
 
     fn new_with_options(options: PageOptions) -> Self {
         Self(options.0)
@@ -60,11 +47,7 @@ impl<const LEVEL: usize> PageEntry<LEVEL> {
     }
 
     pub fn options(self) -> PageOptions {
-        PageOptions(self.0 & PageOptions::MASK)
-    }
-
-    pub fn with_options(self, options: PageOptions) -> Self {
-        Self(self.0 & Self::ADDRESS_MASK | options.0)
+        PageOptions(self.0 & Self::OPTIONS_MASK)
     }
 
     pub fn address(&self) -> PhysicalAddress {
@@ -75,7 +58,7 @@ impl<const LEVEL: usize> PageEntry<LEVEL> {
         self.0 = (self.0 & 0xFFF) | (address.0 as u64 & !0xFFF);
     }
 
-    pub fn present(&self) -> bool {
+    pub fn is_present(&self) -> bool {
         self.0 & (1 << 0) != 0
     }
 
@@ -134,16 +117,8 @@ impl<const LEVEL: usize> PageEntry<LEVEL> {
         self.0 & (1 << 6) != 0
     }
 
-    pub fn is_final_page(&self) -> bool {
+    pub fn is_page(&self) -> bool {
         self.0 & (1 << 7) != 0
-    }
-
-    pub fn page_size(&self) -> Option<usize> {
-        if self.is_final_page() {
-            Some(4096 * 512usize.pow(LEVEL as u32 - 1))
-        } else {
-            None
-        }
     }
 
     pub fn set_final_page(&mut self, final_page: bool) {
@@ -161,7 +136,7 @@ impl<const LEVEL: usize> PageEntry<LEVEL> {
 }
 
 // TODO: improve/complete this Debug implementation
-impl<const LEVEL: usize> core::fmt::Debug for PageEntry<LEVEL> {
+impl core::fmt::Debug for PageEntry {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // const FLAG_MAP: &[(fn(&PageEntry<LEVEL>) -> bool, &str)] = &[
         //     (PageEntry::present, "present"),
@@ -183,14 +158,13 @@ impl<const LEVEL: usize> core::fmt::Debug for PageEntry<LEVEL> {
         //         .join("|")
         // )
         let mut flags = alloc::string::String::with_capacity(8);
-        flags.push(if self.present() { 'p' } else { '-' });
+        flags.push(if self.is_present() { 'p' } else { '-' });
         flags.push(if self.writable() { 'w' } else { '-' });
         flags.push(if self.execute_disabled() { '-' } else { 'x' });
         flags.push(if self.user_access() { 'u' } else { 's' });
         flags.push(if self.dirty() { 'd' } else { '-' });
         flags.push(if self.cacheable() { 'c' } else { '-' });
-        flags.push(if self.is_final_page() { 'f' } else { '-' });
+        flags.push(if self.is_page() { 'f' } else { '-' });
         write!(f, "PageEntry({:?}, {})", self.address(), flags)
     }
 }
-

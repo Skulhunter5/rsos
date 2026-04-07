@@ -1,6 +1,9 @@
 use core::{mem::MaybeUninit, ops::Range};
 
-use alloc::{string::{String, ToString}, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use common::PhysicalAddress;
 
 const PAGE_SIZE: usize = 4096;
@@ -28,7 +31,14 @@ impl RegionHeader {
     const VALUE_BIT_COUNT: usize = size_of::<usize>() * 8;
 
     fn new(meta: &'static mut [usize], first_page: PhysicalAddress, pages: usize) -> Self {
-        Self { meta, first_page, pages, next_region: None, next_check: 0, pages_free: pages }
+        Self {
+            meta,
+            first_page,
+            pages,
+            next_region: None,
+            next_check: 0,
+            pages_free: pages,
+        }
     }
 
     fn alloc_page(&mut self) -> Option<PhysicalAddress> {
@@ -39,7 +49,7 @@ impl RegionHeader {
                 return None;
             }
         }
-        
+
         let mut current = self.next_check;
         loop {
             if !self.check_bit(current) {
@@ -164,7 +174,9 @@ impl PhysicalMemoryManager {
         }
 
         match last_region {
-            Some(region) => Ok(Self { first_region: region }),
+            Some(region) => Ok(Self {
+                first_region: region,
+            }),
             None => Err("no valid region in the provided list".to_string()),
         }
     }

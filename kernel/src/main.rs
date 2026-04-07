@@ -72,10 +72,13 @@ static IDT: Mutex<Option<Box<InterruptDescriptorTable>>> = Mutex::new(None);
 #[unsafe(no_mangle)]
 pub fn kernel_main(bootinfo: &BootInfo) {
     println!("setting up frame allocator...");
-    let mut pmm = PhysicalMemoryManager::init(&bootinfo.available_mem).expect("failed to initialize PhysicalMemoryManager");
+    let mut pmm = PhysicalMemoryManager::init(&bootinfo.available_mem)
+        .expect("failed to initialize PhysicalMemoryManager");
     println!("-> done");
     println!("allocating frame...");
-    let frame = pmm.alloc_page().expect("failed to allocate frame from PhysicalMemoryManager");
+    let frame = pmm
+        .alloc_page()
+        .expect("failed to allocate frame from PhysicalMemoryManager");
     println!("- frame: 0x{:x}", frame.0);
     pmm.free_page(frame);
     println!("-> done");

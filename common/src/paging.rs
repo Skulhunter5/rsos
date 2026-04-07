@@ -1,4 +1,4 @@
-use core::{marker::PhantomData, mem::MaybeUninit};
+use core::{marker::PhantomData, mem::MaybeUninit, ptr};
 
 use alloc::boxed::Box;
 
@@ -105,24 +105,199 @@ impl<A: PageAllocator> Drop for PageMap<A> {
     }
 }
 
-pub type PageMapLevel4 = PageMapLevel<4, PageDirectoryPointerTable>;
-pub type PageDirectoryPointerTable = PageMapLevel<3, PageDirectory>;
-pub type PageDirectory = PageMapLevel<2, PageTable>;
-pub type PageTable = PageMapLevel<1, u8>;
+#[derive(Debug)]
+pub struct Page4K(pub PhysicalAddress);
+
+impl Page4K {
+    pub const SIZE: usize = 4096;
+    pub const ALIGN: usize = Self::SIZE;
+}
+
+#[derive(Debug)]
+pub struct Page2M(pub PhysicalAddress);
+
+impl Page2M {
+    pub const SIZE: usize = 4096 * 512;
+    pub const ALIGN: usize = Self::SIZE;
+}
+
+#[derive(Debug)]
+pub struct Page1G(pub PhysicalAddress);
+
+impl Page1G {
+    pub const SIZE: usize = 4096 * 512 * 512;
+    pub const ALIGN: usize = Self::SIZE;
+}
+
+pub enum TableOrPage<T, P> {
+    Table(T),
+    Page(P),
+}
+
+pub mod pml {
+    pub struct Pt;
+    pub struct Pd;
+    pub struct Pdpt;
+    pub struct Pml4;
+    pub struct Pml5;
+}
+
+pub type PageTable = PageMapLevel<pml::Pt>;
+pub type PageDirectory = PageMapLevel<pml::Pd>;
+pub type PageDirectoryPointerTable = PageMapLevel<pml::Pdpt>;
+pub type PageMapLevel4 = PageMapLevel<pml::Pml4>;
+pub type PageMapLevel5 = PageMapLevel<pml::Pml5>;
 
 #[derive(Debug)]
 #[repr(C, align(4096))]
-pub struct PageMapLevel<const N: usize, T> {
-    entries: [PageEntry<N>; 512],
+pub struct PageMapLevel<L> {
+    entries: [PageEntry; 512],
+    _marker: PhantomData<L>,
+}
+
+impl<L> PageMapLevel<L> {
+    pub const EMPTY: Self = Self { entries: [PageEntry::EMPTY; 512], _marker: PhantomData };
+
+    const ASSERTIONS: () = {
+        assert!(size_of::<PageMapLevel<L>>() == 4096);
+        assert!(align_of::<PageMapLevel<L>>() == 4096);
+        assert!(core::mem::offset_of!(PageMapLevel<L>, entries) == 0);
+    };
+
+    pub unsafe fn new_in(page_allocator: &dyn PageAllocator) -> *mut Self {
+        // const _: () = {
+        //     assert!(size_of::<PageMapLevel<()>>() == 4096);
+        //     assert!(align_of::<PageMapLevel<()>>() == 4096);
+        //     assert!(core::mem::offset_of!(PageMapLevel<()>, entries) == 0);
+        // };
+
+        let ptr = page_allocator.alloc(1) as *mut MaybeUninit<Self>;
+        // SAFETY: MaybeUninit<Self> has the same layout as Self, which is asserted to have size
+        // and align matching the allocated 4K page
+        let table = unsafe { ptr.as_mut().unwrap() };
+        table.write(Self::EMPTY);
+        // SAFETY: `table` has just been initialized to be a valid value
+        ptr::from_mut(unsafe { table.assume_init_mut() })
+    }
+
+    pub fn count_present(&self) -> usize {
+        self.entries.iter().filter(|entry| entry.is_present()).count()
+    }
+
+    pub fn is_entry_present(&self, index: usize) -> bool {
+        self.entries.get(index).map(|entry| entry.is_present()).unwrap_or(false)
+    }
+}
+
+impl PageMapLevel<pml::Pt> {
+    const LEVEL: usize = 1;
+
+    pub fn get(&self, index: usize) -> Option<Page4K> {
+        let entry = self.entries.get(index)?;
+        if !entry.is_present() {
+            return None;
+        }
+
+        assert!(entry.is_page());
+
+        let paddr = entry.address();
+        assert!(paddr.is_aligned_to(Page4K::ALIGN));
+
+        Some(Page4K(paddr))
+    }
+
+    pub fn get_index(vaddr: VirtualAddress) -> usize {
+        const INDEX_MASK: usize = 0b1_1111_1111;
+        vaddr.0 >> (INDEX_MASK.count_ones() as usize * Self::LEVEL) & INDEX_MASK
+    }
+}
+
+impl PageMapLevel<pml::Pd> {
+    const LEVEL: usize = 2;
+
+    pub unsafe fn get(&self, index: usize, phys_to_virt: fn(PhysicalAddress) -> VirtualAddress) -> Option<TableOrPage<&PageMapLevel<pml::Pt>, Page2M>> {
+        let entry = self.entries.get(index)?;
+        if !entry.is_present() {
+            return None;
+        }
+
+        let paddr = entry.address();
+        Some(if entry.is_page() {
+            assert!(paddr.is_aligned_to(Page2M::ALIGN));
+            TableOrPage::Page(Page2M(paddr))
+        } else {
+            assert!(paddr.is_aligned_to(align_of::<PageMapLevel<pml::Pt>>()));
+            let vaddr = phys_to_virt(paddr);
+            let table = unsafe { (vaddr.0 as *const PageMapLevel<pml::Pt>).as_ref().unwrap() };
+            TableOrPage::Table(table)
+        })
+    }
+
+    pub fn get_index(vaddr: VirtualAddress) -> usize {
+        const INDEX_MASK: usize = 0b1_1111_1111;
+        vaddr.0 >> (INDEX_MASK.count_ones() as usize * Self::LEVEL) & INDEX_MASK
+    }
+}
+
+impl PageMapLevel<pml::Pdpt> {
+    const LEVEL: usize = 3;
+
+    pub unsafe fn get(&self, index: usize, phys_to_virt: fn(PhysicalAddress) -> VirtualAddress) -> Option<TableOrPage<&PageMapLevel<pml::Pd>, Page1G>> {
+        let entry = self.entries.get(index)?;
+        if !entry.is_present() {
+            return None;
+        }
+
+        let paddr = entry.address();
+        Some(if entry.is_page() {
+            assert!(paddr.is_aligned_to(Page1G::ALIGN));
+            TableOrPage::Page(Page1G(paddr))
+        } else {
+            assert!(paddr.is_aligned_to(align_of::<PageMapLevel<pml::Pd>>()));
+            let vaddr = phys_to_virt(paddr);
+            let table = unsafe { (vaddr.0 as *const PageMapLevel<pml::Pd>).as_ref().unwrap() };
+            TableOrPage::Table(table)
+        })
+    }
+
+    pub fn get_index(vaddr: VirtualAddress) -> usize {
+        const INDEX_MASK: usize = 0b1_1111_1111;
+        vaddr.0 >> (INDEX_MASK.count_ones() as usize * Self::LEVEL) & INDEX_MASK
+    }
+}
+
+impl PageMapLevel<pml::Pml4> {
+    const LEVEL: usize = 4;
+
+    pub unsafe fn get(&self, index: usize, phys_to_virt: fn(PhysicalAddress) -> VirtualAddress) -> Option<&PageDirectoryPointerTable> {
+        let entry = self.entries.get(index)?;
+        if !entry.is_present() {
+            return None;
+        }
+
+        assert!(!entry.is_page());
+
+        let paddr = entry.address();
+        assert!(paddr.is_aligned_to(align_of::<PageDirectoryPointerTable>()));
+        let vaddr = phys_to_virt(paddr);
+        let table = unsafe { (vaddr.0 as *const PageDirectoryPointerTable).as_ref().unwrap() };
+        Some(table)
+    }
+
+    pub fn get_index(vaddr: VirtualAddress) -> usize {
+        const INDEX_MASK: usize = 0b1_1111_1111;
+        vaddr.0 >> (INDEX_MASK.count_ones() as usize * Self::LEVEL) & INDEX_MASK
+    }
+}
+
+#[derive(Debug)]
+#[repr(C, align(4096))]
+pub struct OldPageMapLevel<const N: usize, T> {
+    entries: [PageEntry; 512],
     _marker: PhantomData<T>,
 }
 
-const _: () = {
-    assert!(size_of::<PageMapLevel4>() == 4096);
-    assert!(core::mem::offset_of!(PageMapLevel4, entries) == 0);
-};
-
-impl<const N: usize, T> PageMapLevel<N, T> {
+impl<const N: usize, T> OldPageMapLevel<N, T> {
     pub fn empty() -> Self {
         Self {
             entries: [PageEntry::EMPTY; 512],
@@ -142,80 +317,30 @@ impl<const N: usize, T> PageMapLevel<N, T> {
         unsafe { (address as *mut Self).as_mut().unwrap() }
     }
 
-    pub fn count_present(&self) -> usize {
-        let mut count = 0;
-        for entry in &self.entries {
-            if entry.present() {
-                count += 1;
-            }
-        }
-
-        count
-    }
-
-    pub fn is_present(&self, index: usize) -> bool {
-        self.entries[index].present()
-    }
-
-    pub fn get(&self, index: usize) -> &PageEntry<N> {
-        &self.entries[index]
-    }
-
-    pub fn set(&mut self, index: usize, entry: PageEntry<N>) -> PageEntry<N> {
+    pub fn set(&mut self, index: usize, entry: PageEntry) -> PageEntry {
         let previous_entry = self.entries[index].clone();
         self.entries[index] = entry;
         return previous_entry;
     }
-
-    pub fn get_mut(&mut self, index: usize) -> &mut PageEntry<N> {
-        &mut self.entries[index]
-    }
-
-    pub fn next_level(
-        &mut self,
-        index: usize,
-        phys_to_virt: fn(PhysicalAddress) -> VirtualAddress,
-    ) -> &mut T {
-        let paddr = self.get(index).address();
-        if paddr.is_null() {
-            panic!("tried getting next page map level from absent entry");
-        }
-        let vaddr = phys_to_virt(paddr);
-        let ptr = vaddr.0 as *mut T;
-        unsafe { ptr.as_mut().unwrap() }
-    }
-
-    pub fn get_index(vaddr: VirtualAddress) -> usize {
-        const INDEX_MASK: usize = 0b1_1111_1111;
-        vaddr.0 >> (INDEX_MASK.count_ones() as usize * N) & INDEX_MASK
-    }
 }
 
-impl<const N: usize, T> core::ops::Index<usize> for PageMapLevel<N, T> {
-    type Output = PageEntry<N>;
+struct OldPageMapLevel4;
 
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.entries[index]
-    }
-}
-
-impl<const N: usize, T> core::ops::IndexMut<usize> for PageMapLevel<N, T> {
-    fn index_mut(&mut self, index: usize) -> &mut Shat's Changedelf::Output {
-        &mut self.entries[index]
-    }
-}
-
-impl PageMapLevel4 {
+impl OldPageMapLevel4 {
     pub unsafe fn get_current() -> &'static mut Self {
         let address = read_cr3().pml4_address();
         unsafe { Self::from_raw(address) }
+    }
+    
+    unsafe fn from_raw(_address: PhysicalAddress) -> &'static mut Self {
+        todo!();
     }
 }
 
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct Pml4 {
-    entries: [PageEntry<4>; 512],
+    entries: [PageEntry; 512],
 }
 
 impl Pml4 {
