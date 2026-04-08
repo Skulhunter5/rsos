@@ -13,7 +13,7 @@ pub struct PageMap<A: PageAllocator> {
 
 impl<A: PageAllocator> PageMap<A> {
     pub fn new(page_allocator: A) -> Self {
-        let pml4 = PageMapLevel4::new_in(&page_allocator);
+        let pml4 = unsafe { PageMapLevel4::new_in(&page_allocator) };
         // let pml4 = Box::new_uninit();
         // let pml4 = unsafe { pml4.assume_init() };
         Self { pml4, page_allocator }
@@ -33,7 +33,9 @@ impl<A: PageAllocator> PageMap<A> {
         // }
         // let pdpt = self.pml4.entries[pml4_index].address();
 
-        let entry = self.pml4.get_mut(pml4_index);
+        let pml4 = unsafe { self.pml4.as_ref().unwrap() };
+
+        let entry = pml4.get_mut(pml4_index);
         if !entry.present() {
             let new_pdpt = PageDirectoryPointerTable::new_in(&self.page_allocator);
             let new_pdpt: *mut PageDirectoryPointerTable = Box::into_raw(unsafe { Box::new_zeroed().assume_init() });
@@ -102,6 +104,9 @@ impl<A: PageAllocator> Drop for PageMap<A> {
     fn drop(&mut self) {
         drop(self.pml4);
         self.page_allocator.dealloc(self.pml4.cast::<u8>(), 1);
+        // TODO: ensure that everything (including actual pages referenced by the tables) is freed
+        // correctly
+        todo!();
     }
 }
 
