@@ -1,4 +1,7 @@
-use crate::PhysicalAddress;
+use core::marker::PhantomData;
+
+use crate::{PhysicalAddress, VirtualAddress};
+use super::{IPageMapLevel, pml, Page4K, Page2M, Page1G, TableOrPage, PageTable, PageDirectory, PageDirectoryPointerTable, PageMapLevel4};
 
 const PAGE_SIZE: usize = 4096;
 
@@ -15,13 +18,24 @@ impl Default for PageOptions {
     }
 }
 
-// TODO: fix address mask to include "execute disable" bit etc.
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct PageEntry(u64);
+pub type PageTableEntry = PageEntry<pml::Pt>;
+pub type PageDirectoryEntry = PageEntry<pml::Pd>;
+pub type PageDirectoryPointerTableEntry = PageEntry<pml::Pdpt>;
+pub type PageMapLevel4Entry = PageEntry<pml::Pml4>;
+pub type PageMapLevel5Entry = PageEntry<pml::Pml5>;
 
-impl PageEntry {
-    pub const EMPTY: Self = Self(0);
+pub type PtEntry = PageEntry<pml::Pt>;
+pub type PdEntry = PageEntry<pml::Pd>;
+pub type PdptEntry = PageEntry<pml::Pdpt>;
+pub type Pml4Entry = PageEntry<pml::Pml4>;
+pub type Pml5Entry = PageEntry<pml::Pml5>;
+
+#[repr(transparent)]
+pub struct PageEntry<L: IPageMapLevel>(u64, PhantomData<L>);
+
+// TODO: add support for the PAT-bit of PageTableEntry
+impl<L: IPageMapLevel> PageEntry<L> {
+    pub const EMPTY: Self = Self(0, PhantomData);
 
     const MAXIMUM_PHYSICAL_ADDRESS_BIT: usize = 52;
     const BIT_PRESENT: u64 = 1;
@@ -36,7 +50,7 @@ impl PageEntry {
     const OPTIONS_MASK: u64 = PageOptions::MASK;
 
     fn new_with_options(options: PageOptions) -> Self {
-        Self(options.0)
+        Self(options.0, PhantomData)
     }
 
     pub unsafe fn new_present(paddr: PhysicalAddress, options: PageOptions) -> Self {
@@ -46,8 +60,14 @@ impl PageEntry {
         return s;
     }
 
-    pub fn options(self) -> PageOptions {
+    pub fn options(&self) -> PageOptions {
         PageOptions(self.0 & Self::OPTIONS_MASK)
+    }
+
+    pub fn set_options(&mut self, options: PageOptions) -> PageOptions {
+        let previous = self.options();
+        self.0 = (self.0 & Self::ADDRESS_MASK) | options.0;
+        return previous;
     }
 
     pub fn address(&self) -> PhysicalAddress {
@@ -136,7 +156,7 @@ impl PageEntry {
 }
 
 // TODO: improve/complete this Debug implementation
-impl core::fmt::Debug for PageEntry {
+impl<L: IPageMapLevel> core::fmt::Debug for PageEntry<L> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // const FLAG_MAP: &[(fn(&PageEntry<LEVEL>) -> bool, &str)] = &[
         //     (PageEntry::present, "present"),
@@ -166,5 +186,119 @@ impl core::fmt::Debug for PageEntry {
         flags.push(if self.cacheable() { 'c' } else { '-' });
         flags.push(if self.is_page() { 'f' } else { '-' });
         write!(f, "PageEntry({:?}, {})", self.address(), flags)
+    }
+}
+
+impl PageEntry<pml::Pt> {
+    pub fn get(&self) -> Option<Page4K> {
+        if !self.is_present() {
+            return None;
+        }
+
+        let paddr = self.address();
+        assert!(paddr.is_aligned_to(Page4K::ALIGN));
+
+        Some(Page4K(paddr))
+    }
+
+    pub unsafe fn take(&mut self) -> Option<Page4K> {
+        if !self.is_present() {
+            return None;
+        }
+
+        let paddr = self.address();
+        assert!(paddr.is_aligned_to(Page4K::ALIGN));
+        let page = Page4K(paddr);
+        self.set_address(PhysicalAddress::null());
+        self.set_present(false);
+
+        Some(page)
+    }
+
+    pub unsafe fn set(&mut self, page: Page4K) -> Option<Page4K> {
+        let previous = unsafe { self.take() };
+
+        self.set_address(page.0);
+        self.set_present(true);
+
+        return previous;
+    }
+}
+
+impl PageEntry<pml::Pd> {
+    pub unsafe fn get(&self, phys_to_virt: fn(PhysicalAddress) -> VirtualAddress) -> Option<TableOrPage<&PageTable, Page2M>> {
+        if !self.is_present() {
+            return None;
+        }
+
+        let paddr = self.address();
+        Some(if self.is_page() {
+            assert!(paddr.is_aligned_to(Page2M::ALIGN));
+            TableOrPage::Page(Page2M(paddr))
+        } else {
+            assert!(paddr.is_aligned_to(align_of::<PageTable>()));
+            let vaddr = phys_to_virt(paddr);
+            let table = unsafe { (vaddr.0 as *const PageTable).as_ref().unwrap() };
+            TableOrPage::Table(table)
+        })
+    }
+
+    pub unsafe fn take(&self) -> Option<TableOrPage<PageTable, Page2M>> {
+        todo!();
+    }
+
+    pub unsafe fn set(&self, _table_or_page: TableOrPage<PageTable, Page2M>) -> Option<TableOrPage<PageTable, Page2M>> {
+        todo!();
+    }
+}
+
+impl PageEntry<pml::Pdpt> {
+    pub unsafe fn get(&self, phys_to_virt: fn(PhysicalAddress) -> VirtualAddress) -> Option<TableOrPage<&PageDirectory, Page1G>> {
+        if !self.is_present() {
+            return None;
+        }
+
+        let paddr = self.address();
+        Some(if self.is_page() {
+            assert!(paddr.is_aligned_to(Page1G::ALIGN));
+            TableOrPage::Page(Page1G(paddr))
+        } else {
+            assert!(paddr.is_aligned_to(align_of::<PageDirectory>()));
+            let vaddr = phys_to_virt(paddr);
+            let table = unsafe { (vaddr.0 as *const PageDirectory).as_ref().unwrap() };
+            TableOrPage::Table(table)
+        })
+    }
+}
+
+impl PageEntry<pml::Pml4> {
+    pub unsafe fn get(&self, phys_to_virt: fn(PhysicalAddress) -> VirtualAddress) -> Option<&PageDirectoryPointerTable> {
+        if !self.is_present() {
+            return None;
+        }
+
+        assert!(!self.is_page());
+
+        let paddr = self.address();
+        assert!(paddr.is_aligned_to(align_of::<PageDirectoryPointerTable>()));
+        let vaddr = phys_to_virt(paddr);
+        let table = unsafe { (vaddr.0 as *const PageDirectoryPointerTable).as_ref().unwrap() };
+        Some(table)
+    }
+}
+
+impl PageEntry<pml::Pml5> {
+    pub unsafe fn get(&self, phys_to_virt: fn(PhysicalAddress) -> VirtualAddress) -> Option<&PageMapLevel4> {
+        if !self.is_present() {
+            return None;
+        }
+
+        assert!(!self.is_page());
+
+        let paddr = self.address();
+        assert!(paddr.is_aligned_to(align_of::<PageMapLevel4>()));
+        let vaddr = phys_to_virt(paddr);
+        let table = unsafe { (vaddr.0 as *const PageMapLevel4).as_ref().unwrap() };
+        Some(table)
     }
 }
