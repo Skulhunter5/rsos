@@ -95,6 +95,18 @@ impl<L: IPageMapLevel> PageMapLevel<L> {
     pub fn get_mut(&mut self, index: usize) -> Option<&mut PageEntry<L>> {
         self.entries.get_mut(index)
     }
+
+    pub fn iter(&self) -> core::slice::Iter<PageEntry<L>> {
+        self.entries.iter()
+    }
+}
+
+impl PageMapLevel4 {
+    pub unsafe fn get_current() -> &'static Self {
+        let address = super::read_cr3().pml4_address();
+        let address: u64 = address.into();
+        unsafe { (address as *mut Self).as_mut().unwrap() }
+    }
 }
 
 // impl PageMapLevel<pml::Pt> {

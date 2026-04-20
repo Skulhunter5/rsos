@@ -4,9 +4,10 @@ use crate::{allocation::PageAllocator, PhysicalAddress, VirtualAddress};
 
 mod page_entry;
 mod page_map_level;
-pub(self) use page_entry::{PageEntry, PageOptions};
 
-pub(self) use page_map_level::{PageTable, PageDirectory, PageDirectoryPointerTable, PageMapLevel4, PageMapLevel5, pml};
+pub use page_entry::{PageEntry, PageOptions};
+pub use page_map_level::{PageTable, PageDirectory, PageDirectoryPointerTable, PageMapLevel4, PageMapLevel5, pml};
+
 pub(self) use page_map_level::IPageMapLevel;
 
 pub struct PageMap<A: PageAllocator> {
@@ -22,7 +23,7 @@ impl<A: PageAllocator> PageMap<A> {
         Self { pml4, page_allocator }
     }
 
-    pub fn map(&mut self, vaddr: VirtualAddress, paddr: PhysicalAddress) -> PhysicalAddress {
+    pub unsafe fn map(&mut self, vaddr: VirtualAddress, paddr: PhysicalAddress) -> PhysicalAddress {
         // let mut entry = PageEntry::empty();
         // entry.set_address(paddr);
         // let old_entry = self.pml4.set(PageMapLevel4::get_index(vaddr), entry);
