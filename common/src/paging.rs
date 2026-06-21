@@ -1,5 +1,3 @@
-use alloc::boxed::Box;
-
 use crate::{allocation::PageAllocator, PhysicalAddress, VirtualAddress};
 
 mod page_entry;
@@ -8,7 +6,7 @@ mod page_map_level;
 pub use page_entry::{PageEntry, PageOptions};
 pub use page_map_level::{PageTable, PageDirectory, PageDirectoryPointerTable, PageMapLevel4, PageMapLevel5, pml};
 
-pub(self) use page_map_level::IPageMapLevel;
+pub(self) use page_map_level::{IPageMapLevel, PageMapLevel};
 
 pub struct PageMap<A: PageAllocator> {
     pml4: *mut PageMapLevel4,
@@ -18,101 +16,156 @@ pub struct PageMap<A: PageAllocator> {
 impl<A: PageAllocator> PageMap<A> {
     pub fn new(page_allocator: A) -> Self {
         let pml4 = unsafe { PageMapLevel4::new_in(&page_allocator) };
-        // let pml4 = Box::new_uninit();
-        // let pml4 = unsafe { pml4.assume_init() };
         Self { pml4, page_allocator }
     }
 
-    pub unsafe fn map(&mut self, vaddr: VirtualAddress, paddr: PhysicalAddress) -> PhysicalAddress {
-        // let mut entry = PageEntry::empty();
-        // entry.set_address(paddr);
-        // let old_entry = self.pml4.set(PageMapLevel4::get_index(vaddr), entry);
-        // return old_entry.address();
+    pub unsafe fn map(
+        &mut self,
+        vaddr: VirtualAddress,
+        paddr: PhysicalAddress,
+        options: PageOptions,
+    ) -> PhysicalAddress {
+        let pdpt = unsafe {
+            self.get_or_create_child::<pml::Pml4, pml::Pdpt>(
+                self.pml4,
+                PageMapLevel4::get_index(vaddr),
+                options,
+            )
+        };
+        let pd = unsafe {
+            self.get_or_create_child::<pml::Pdpt, pml::Pd>(
+                pdpt,
+                PageDirectoryPointerTable::get_index(vaddr),
+                options,
+            )
+        };
+        let pt = unsafe {
+            self.get_or_create_child::<pml::Pd, pml::Pt>(
+                pd,
+                PageDirectory::get_index(vaddr),
+                options,
+            )
+        };
 
-        let pml4_index = PageMapLevel4::get_index(vaddr);
-        // if !self.pml4.is_present(pml4_index) {
-        //     let new_pdpt: *mut PageDirectoryPointerTable = Box::into_raw(unsafe { Box::new_zeroed().assume_init() });
-        //     let entry = PageEntry::new_present(PhysicalAddress(new_pdpt as usize));
-        //     self.pml4.set(pml4_index, entry);
-        // }
-        // let pdpt = self.pml4.entries[pml4_index].address();
+        let pt_index = PageTable::get_index(vaddr);
+        let entry = unsafe { &mut *pt }.get_mut(pt_index).unwrap();
+        let old_paddr = entry.address();
+        *entry = unsafe { PageEntry::new_present(paddr, options) };
+        old_paddr
+    }
 
-        let pml4 = unsafe { self.pml4.as_ref().unwrap() };
+    pub unsafe fn unmap(&mut self, vaddr: VirtualAddress) -> Option<PhysicalAddress> {
+        let pdpt = unsafe {
+            self.get_child::<pml::Pml4, pml::Pdpt>(
+                self.pml4,
+                PageMapLevel4::get_index(vaddr),
+            )?
+        };
+        let pd = unsafe {
+            self.get_child::<pml::Pdpt, pml::Pd>(
+                pdpt,
+                PageDirectoryPointerTable::get_index(vaddr),
+            )?
+        };
+        let pt = unsafe {
+            self.get_child::<pml::Pd, pml::Pt>(
+                pd,
+                PageDirectory::get_index(vaddr),
+            )?
+        };
 
-        let entry = pml4.get_mut(pml4_index).unwrap();
+        let pt_index = PageTable::get_index(vaddr);
+        let entry = unsafe { &mut *pt }.get_mut(pt_index).unwrap();
         if !entry.is_present() {
-            let new_pdpt = unsafe { PageDirectoryPointerTable::new_in(&self.page_allocator) };
-            let new_pdpt: *mut PageDirectoryPointerTable = Box::into_raw(unsafe { Box::new_zeroed().assume_init() });
-            // let entry = unsafe { PageEntry::new_present(PhysicalAddress(new_pdpt as usize), PageOptions::default()) };
-            entry.set_options(PageOptions::default());
-            unsafe { entry.set(new_pdpt) };
-            // self.pml4.set(pml4_index, entry);
+            return None;
         }
+        let old_paddr = entry.address();
+        *entry = PageEntry::EMPTY;
+        Some(old_paddr)
+    }
 
+    /// Walks one level of the page table hierarchy. If the entry at `index` in `parent`
+    /// is not present, allocates a new child table, stores its physical address in the
+    /// entry, and returns a pointer to the child.
+    ///
+    /// # Safety
+    /// `parent` must point to a valid page table, `index` < 512.
+    /// Assumes identity mapping (virtual == physical) for allocated pages.
+    unsafe fn get_or_create_child<P: IPageMapLevel, C: IPageMapLevel>(
+        &mut self,
+        parent: *mut PageMapLevel<P>,
+        index: usize,
+        options: PageOptions,
+    ) -> *mut PageMapLevel<C> {
+        let entry = unsafe { &mut *parent }.get_mut(index).unwrap();
+        if entry.is_present() {
+            assert!(!entry.is_page(), "cannot map over an existing huge page");
+            entry.address().0 as *mut PageMapLevel<C>
+        } else {
+            let child = unsafe { PageMapLevel::<C>::new_in(&self.page_allocator) };
+            *entry = unsafe { PageEntry::new_present(PhysicalAddress::from(child as usize), options) };
+            child
+        }
+    }
 
-        // let pml4 = unsafe { PageMapLevel4::get_current() };
-        // let pml4_index = (vaddr >> 39) & 0x1FF;
-        //
-        // let pdp = if pml4.is_present(pml4_index) {
-        //     pml4.next_level(pml4_index, phys_to_virt)
-        // } else {
-        //     let pdp = PageDirectoryPointer::new_in(&PAGE_ALLOCATOR);
-        //     let pdp_address = PhysicalAddress::from(ptr::from_ref(pdp) as usize);
-        //     let mut pml4_entry = entry_template.clone();
-        //     pml4_entry.set_address(pdp_address);
-        //     pml4.set(pml4_index, pml4_entry);
-        //
-        //     pdp
-        // };
-        // let pdp_index = (vaddr >> 30) & 0x1FF;
-        //
-        // let pd = if pdp.is_present(pdp_index) {
-        //     pdp.next_level(pdp_index, phys_to_virt)
-        // } else {
-        //     let pd = PageDirectory::new_in(&PAGE_ALLOCATOR);
-        //     let pd_address = PhysicalAddress::from(ptr::from_ref(pd) as usize);
-        //     let mut pdp_entry = entry_template.clone();
-        //     pdp_entry.set_address(pd_address);
-        //     pdp.set(pdp_index, pdp_entry);
-        //
-        //     pd
-        // };
-        // let pd_index = (vaddr >> 21) & 0x1FF;
-        //
-        // let pt = if pd.is_present(pd_index) {
-        //     pd.next_level(pd_index, phys_to_virt)
-        // } else {
-        //     let pt = PageTable::new_in(&PAGE_ALLOCATOR);
-        //     let pt_address = PhysicalAddress::from(ptr::from_ref(pt) as usize);
-        //     let mut pd_entry = entry_template.clone();
-        //     pd_entry.set_address(pt_address);
-        //     pd.set(pd_index, pd_entry);
-        //
-        //     pt
-        // };
-        // let pt_index = (vaddr >> 12) & 0x1FF;
-        //
-        // if pt.is_present(pt_index) {
-        //     panic!(
-        //         "Trying to map an already present page while mapping higher-half kernel"
-        //     );
-        // } else {
-        //     let mut pt_entry = entry_template.clone();
-        //     pt_entry.set_address(PhysicalAddress::from(paddr));
-        //     pt.set(pt_index, pt_entry);
-        // }
+    /// Walks one level of the page table hierarchy without creating.
+    /// Returns `None` if the entry is not present.
+    ///
+    /// # Safety
+    /// `parent` must point to a valid page table, `index` < 512.
+    /// Assumes identity mapping (virtual == physical) for allocated pages.
+    unsafe fn get_child<P: IPageMapLevel, C: IPageMapLevel>(
+        &self,
+        parent: *mut PageMapLevel<P>,
+        index: usize,
+    ) -> Option<*mut PageMapLevel<C>> {
+        let entry = unsafe { &*parent }.get(index)?;
+        if !entry.is_present() {
+            return None;
+        }
+        assert!(!entry.is_page(), "cannot traverse through an existing huge page");
+        let child_paddr = entry.address();
+        Some(child_paddr.0 as *mut PageMapLevel<C>)
+    }
 
-        todo!();
+    unsafe fn free_pml4(&mut self, table: *mut PageMapLevel4) {
+        for entry in unsafe { &*table }.iter() {
+            if entry.is_present() {
+                let child = entry.address().0 as *mut PageDirectoryPointerTable;
+                unsafe { self.free_pdpt(child) };
+            }
+        }
+        self.page_allocator.dealloc(table.cast::<u8>(), 1);
+    }
+
+    unsafe fn free_pdpt(&mut self, table: *mut PageDirectoryPointerTable) {
+        for entry in unsafe { &*table }.iter() {
+            if entry.is_present() && !entry.is_page() {
+                let child = entry.address().0 as *mut PageDirectory;
+                unsafe { self.free_pd(child) };
+            }
+        }
+        self.page_allocator.dealloc(table.cast::<u8>(), 1);
+    }
+
+    unsafe fn free_pd(&mut self, table: *mut PageDirectory) {
+        for entry in unsafe { &*table }.iter() {
+            if entry.is_present() && !entry.is_page() {
+                let child = entry.address().0 as *mut PageTable;
+                unsafe { self.free_pt(child) };
+            }
+        }
+        self.page_allocator.dealloc(table.cast::<u8>(), 1);
+    }
+
+    unsafe fn free_pt(&mut self, table: *mut PageTable) {
+        self.page_allocator.dealloc(table.cast::<u8>(), 1);
     }
 }
 
 impl<A: PageAllocator> Drop for PageMap<A> {
     fn drop(&mut self) {
-        drop(self.pml4);
-        self.page_allocator.dealloc(self.pml4.cast::<u8>(), 1);
-        // TODO: ensure that everything (including actual pages referenced by the tables) is freed
-        // correctly
-        todo!();
+        unsafe { self.free_pml4(self.pml4) };
     }
 }
 

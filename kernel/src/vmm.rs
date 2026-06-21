@@ -1,31 +1,12 @@
-use common::{PhysicalAddress, VirtualAddress, allocation::PageAllocator, paging::{PageMap, PageMapLevel4}};
+use crate::memory::PhysicalMemoryManager;
 
 pub struct VirtualMemoryManager {
-    kernel_page_map: PageMap,
+    pmm: PhysicalMemoryManager,
 }
 
 impl VirtualMemoryManager {
-    pub fn init() -> Self {
-        todo!();
-    }
-
-    fn convert_page_map<A: PageAllocator>(page_allocator: A) -> PageMap<A> {
-        let page_map = PageMap::new(page_allocator);
-
-        let phys_to_virt = |paddr: PhysicalAddress| { VirtualAddress(paddr.0) };
-
-        let pml4 = unsafe { PageMapLevel4::get_current() };
-        for entry in pml4.iter() {
-            match unsafe { entry.get(phys_to_virt) } {
-                Some(pdpt) => {
-                    for entry in pdpt.iter() {
-                        todo!();
-                    }
-                }
-                None => (),
-            }
-        }
-
-        todo!();
+    pub fn init(pmm: PhysicalMemoryManager) -> Self {
+        // TODO: create PageMap, copy entries from current page table, switch to new page tables
+        Self { pmm }
     }
 }

@@ -83,7 +83,7 @@ pub fn kernel_main(bootinfo: &BootInfo) {
     pmm.free_page(frame);
     println!("-> done");
 
-    let _vmm = VirtualMemoryManager::init();
+    let _vmm = VirtualMemoryManager::init(pmm);
 
     print!("loading gdt...");
     let (gdt, tss) = gdt::init();

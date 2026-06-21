@@ -85,7 +85,7 @@ impl<L: IPageMapLevel> PageMapLevel<L> {
     pub fn get_index(vaddr: VirtualAddress) -> usize {
         const INDEX_MASK_BIT_COUNT: usize = 9;
         const INDEX_MASK: usize = (1 << INDEX_MASK_BIT_COUNT) - 1;
-        vaddr.0 >> (INDEX_MASK_BIT_COUNT * L::LEVEL) & INDEX_MASK
+        vaddr.0 >> (INDEX_MASK_BIT_COUNT * L::LEVEL + 3) & INDEX_MASK
     }
 
     pub fn get(&self, index: usize) -> Option<&PageEntry<L>> {
